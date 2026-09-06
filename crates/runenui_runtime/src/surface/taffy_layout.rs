@@ -208,7 +208,7 @@ impl<'a, Action> LayoutKernel<'a, Action> {
                             artifact
                                 .lines()
                                 .iter()
-                                .flat_map(|line| line.runs())
+                                .flat_map(runenui_text::TextLine::runs)
                                 .map(|run| run.resource_ref().clone())
                                 .collect()
                         } else {
