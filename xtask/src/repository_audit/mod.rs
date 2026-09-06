@@ -25,6 +25,9 @@ const REUSABLE_WORKFLOW_OWNER_AND_DIRECTORY: &str = "dornglut/github-workflows/.
 const REUSABLE_RUST_WORKFLOW: &str = "reusable-rust-cargo-validate.yml";
 const ACTIVE_WORKFLOW_DIRECTORY: &str = ".github/workflows";
 const CI_WORKFLOW_PATH: &str = ".github/workflows/ci.yml";
+const VISUAL_CONFORMANCE_WORKFLOW_PATH: &str = ".github/workflows/visual-conformance.yml";
+const VISUAL_CONFORMANCE_PROOF_PATH: &str =
+    "crates/runenui_render_wgpu/tests/m8d_visual.rs";
 const ISSUE_TEMPLATE_DIRECTORY: &str = ".github/ISSUE_TEMPLATE";
 const MIGRATION_HISTORY_PATH: &str = "docs/history/public-repository-migration.md";
 
@@ -66,7 +69,7 @@ const REQUIRED_ISSUE_TEMPLATE_FILES: &[&str] = &[
     "milestone-slice.yml",
     "proposal.yml",
 ];
-const EXPECTED_ACTIVE_WORKFLOW_FILES: &[&str] = &["ci.yml"];
+const BASELINE_ACTIVE_WORKFLOW_FILES: &[&str] = &["ci.yml"];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OutputFormat {
@@ -330,9 +333,17 @@ fn audit_issue_template_inventory(root: &Path, findings: &mut Vec<Finding>) -> R
     Ok(())
 }
 
+fn expected_active_workflow_files(root: &Path) -> BTreeSet<String> {
+    let mut expected = string_set(BASELINE_ACTIVE_WORKFLOW_FILES);
+    if root.join(VISUAL_CONFORMANCE_PROOF_PATH).is_file() {
+        expected.insert("visual-conformance.yml".to_owned());
+    }
+    expected
+}
+
 fn audit_ci_workflow(root: &Path, findings: &mut Vec<Finding>) -> Result<(), String> {
     let found = collect_direct_workflow_names(&root.join(ACTIVE_WORKFLOW_DIRECTORY))?;
-    let expected = string_set(EXPECTED_ACTIVE_WORKFLOW_FILES);
+    let expected = expected_active_workflow_files(root);
     if found != expected {
         findings.push(Finding::fatal(
             "repository.workflow_inventory",
@@ -352,6 +363,20 @@ fn audit_ci_workflow(root: &Path, findings: &mut Vec<Finding>) -> Result<(), Str
                 accepted_reusable_workflow_reference()
             ),
         ));
+    }
+
+    if root.join(VISUAL_CONFORMANCE_PROOF_PATH).is_file()
+        && root.join(VISUAL_CONFORMANCE_WORKFLOW_PATH).is_file()
+    {
+        let actual = normalize_newlines(&read_to_string(root, VISUAL_CONFORMANCE_WORKFLOW_PATH)?);
+        let expected = normalize_newlines(&expected_visual_conformance_workflow());
+        if actual != expected {
+            findings.push(Finding::fatal(
+                "repository.visual_workflow_contract",
+                Some(VISUAL_CONFORMANCE_WORKFLOW_PATH.to_owned()),
+                "visual conformance must remain the exact read-only real-wgpu proof and fixed artifact-upload workflow",
+            ));
+        }
     }
     Ok(())
 }
@@ -546,6 +571,11 @@ fn expected_ci_workflow() -> String {
         "name: CI\n\non:\n  pull_request:\n  push:\n    branches:\n      - main\n\npermissions:\n  contents: read\n\nconcurrency:\n  group: ci-${{{{ github.workflow }}}}-${{{{ github.ref }}}}\n  cancel-in-progress: true\n\njobs:\n  validate:\n    name: RunenUI validation\n    uses: {}\n",
         accepted_reusable_workflow_reference()
     )
+}
+
+fn expected_visual_conformance_workflow() -> String {
+    "name: Visual Conformance\n\non:\n  pull_request:\n  push:\n    branches:\n      - main\n  workflow_dispatch:\n\npermissions:\n  contents: read\n\nconcurrency:\n  group: visual-conformance-${{ github.workflow }}-${{ github.ref }}\n  cancel-in-progress: true\n\njobs:\n  renderer:\n    name: Real-wgpu visual evidence\n    runs-on: ubuntu-24.04\n    timeout-minutes: 20\n    steps:\n      - name: Resolve expected revision\n        id: revision\n        env:\n          EVENT_NAME: ${{ github.event_name }}\n          EVENT_SHA: ${{ github.sha }}\n          PULL_REQUEST_HEAD_SHA: ${{ github.event.pull_request.head.sha }}\n        run: |\n          set -euo pipefail\n          case \"$EVENT_NAME\" in\n            pull_request) expected_revision=\"$PULL_REQUEST_HEAD_SHA\" ;;\n            push|workflow_dispatch) expected_revision=\"$EVENT_SHA\" ;;\n            *) echo \"Unsupported event: $EVENT_NAME\" >&2; exit 1 ;;\n          esac\n          test -n \"$expected_revision\"\n          echo \"expected_revision=$expected_revision\" >> \"$GITHUB_OUTPUT\"\n\n      - name: Checkout exact revision\n        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n          ref: ${{ steps.revision.outputs.expected_revision }}\n          clean: true\n          fetch-depth: 1\n          persist-credentials: false\n\n      - name: Prove checked-out revision\n        env:\n          EXPECTED_REVISION: ${{ steps.revision.outputs.expected_revision }}\n        run: |\n          set -euo pipefail\n          actual_revision=\"$(git rev-parse HEAD)\"\n          echo \"Repository: $GITHUB_REPOSITORY\"\n          echo \"Event: $GITHUB_EVENT_NAME\"\n          echo \"Expected revision: $EXPECTED_REVISION\"\n          echo \"Actual checked-out revision: $actual_revision\"\n          test \"$actual_revision\" = \"$EXPECTED_REVISION\"\n          echo \"Conclusion: PASS\"\n\n      - name: Install stable Rust\n        run: rustup toolchain install stable --profile minimal\n\n      - name: Install deterministic Vulkan fallback\n        run: |\n          set -euo pipefail\n          sudo apt-get update\n          sudo apt-get install --yes mesa-vulkan-drivers vulkan-tools\n          icd=\"$(find /usr/share/vulkan/icd.d -maxdepth 1 -type f -name 'lvp_icd*.json' -print -quit)\"\n          test -n \"$icd\"\n          echo \"Lavapipe ICD: $icd\"\n          echo \"VK_DRIVER_FILES=$icd\" >> \"$GITHUB_ENV\"\n          echo \"VK_ICD_FILENAMES=$icd\" >> \"$GITHUB_ENV\"\n          echo \"WGPU_BACKEND=vulkan\" >> \"$GITHUB_ENV\"\n          echo \"XDG_RUNTIME_DIR=${RUNNER_TEMP}/runenui-xdg\" >> \"$GITHUB_ENV\"\n          mkdir -p \"${RUNNER_TEMP}/runenui-xdg\"\n          chmod 700 \"${RUNNER_TEMP}/runenui-xdg\"\n          vulkaninfo --summary\n\n      - name: Generate real-wgpu visual evidence\n        env:\n          RUST_BACKTRACE: '1'\n          RUNENUI_M8D_EVIDENCE_DIR: ${{ runner.temp }}/runenui-visual-conformance\n        run: |\n          set -euo pipefail\n          cargo +stable test --locked -p runenui_render_wgpu --test shaped_text -- --nocapture\n          cargo +stable test --locked -p runenui_render_wgpu --test m8d_visual \\\n            real_wgpu_m8d_contact_sheet_covers_responsive_multiscript_text \\\n            -- --nocapture\n          test -s \"${RUNENUI_M8D_EVIDENCE_DIR}/m8d-production-text-contact-sheet.png\"\n          test -s \"${RUNENUI_M8D_EVIDENCE_DIR}/m8d-production-text-evidence.txt\"\n\n      - name: Check repository hygiene\n        run: |\n          set -euo pipefail\n          git diff --check\n          status=\"$(git status --short)\"\n          if [ -n \"$status\" ]; then\n            printf 'Visual conformance changed tracked state:\\n%s\\n' \"$status\" >&2\n            exit 1\n          fi\n\n      - name: Upload human-review evidence\n        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\n        with:\n          name: runenui-visual-conformance-${{ steps.revision.outputs.expected_revision }}\n          path: ${{ runner.temp }}/runenui-visual-conformance\n          if-no-files-found: error\n          retention-days: 7\n"
+        .to_owned()
 }
 
 fn append_human_summary(output: &mut String, report: &AuditReport) {

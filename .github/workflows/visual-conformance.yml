@@ -1,0 +1,108 @@
+name: Visual Conformance
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visual-conformance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  renderer:
+    name: Real-wgpu visual evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Resolve expected revision
+        id: revision
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SHA: ${{ github.sha }}
+          PULL_REQUEST_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request) expected_revision="$PULL_REQUEST_HEAD_SHA" ;;
+            push|workflow_dispatch) expected_revision="$EVENT_SHA" ;;
+            *) echo "Unsupported event: $EVENT_NAME" >&2; exit 1 ;;
+          esac
+          test -n "$expected_revision"
+          echo "expected_revision=$expected_revision" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ steps.revision.outputs.expected_revision }}
+          clean: true
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove checked-out revision
+        env:
+          EXPECTED_REVISION: ${{ steps.revision.outputs.expected_revision }}
+        run: |
+          set -euo pipefail
+          actual_revision="$(git rev-parse HEAD)"
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Event: $GITHUB_EVENT_NAME"
+          echo "Expected revision: $EXPECTED_REVISION"
+          echo "Actual checked-out revision: $actual_revision"
+          test "$actual_revision" = "$EXPECTED_REVISION"
+          echo "Conclusion: PASS"
+
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Install deterministic Vulkan fallback
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes mesa-vulkan-drivers vulkan-tools
+          icd="$(find /usr/share/vulkan/icd.d -maxdepth 1 -type f -name 'lvp_icd*.json' -print -quit)"
+          test -n "$icd"
+          echo "Lavapipe ICD: $icd"
+          echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+          echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
+          echo "WGPU_BACKEND=vulkan" >> "$GITHUB_ENV"
+          echo "XDG_RUNTIME_DIR=${RUNNER_TEMP}/runenui-xdg" >> "$GITHUB_ENV"
+          mkdir -p "${RUNNER_TEMP}/runenui-xdg"
+          chmod 700 "${RUNNER_TEMP}/runenui-xdg"
+          vulkaninfo --summary
+
+      - name: Generate real-wgpu visual evidence
+        env:
+          RUST_BACKTRACE: '1'
+          RUNENUI_M8D_EVIDENCE_DIR: ${{ runner.temp }}/runenui-visual-conformance
+        run: |
+          set -euo pipefail
+          cargo +stable test --locked -p runenui_render_wgpu --test shaped_text -- --nocapture
+          cargo +stable test --locked -p runenui_render_wgpu --test m8d_visual \
+            real_wgpu_m8d_contact_sheet_covers_responsive_multiscript_text \
+            -- --nocapture
+          test -s "${RUNENUI_M8D_EVIDENCE_DIR}/m8d-production-text-contact-sheet.png"
+          test -s "${RUNENUI_M8D_EVIDENCE_DIR}/m8d-production-text-evidence.txt"
+
+      - name: Check repository hygiene
+        run: |
+          set -euo pipefail
+          git diff --check
+          status="$(git status --short)"
+          if [ -n "$status" ]; then
+            printf 'Visual conformance changed tracked state:\n%s\n' "$status" >&2
+            exit 1
+          fi
+
+      - name: Upload human-review evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: runenui-visual-conformance-${{ steps.revision.outputs.expected_revision }}
+          path: ${{ runner.temp }}/runenui-visual-conformance
+          if-no-files-found: error
+          retention-days: 7
