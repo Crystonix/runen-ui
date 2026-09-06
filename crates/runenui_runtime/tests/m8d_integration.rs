@@ -85,9 +85,7 @@ fn shaped_refs(publication: &SurfacePublication) -> Vec<runenui_core::ResourceRe
         .collect()
 }
 
-fn retained_text_measurement(
-    publication: &SurfacePublication,
-) -> &SurfaceTextMeasurementRecord {
+fn retained_text_measurement(publication: &SurfacePublication) -> &SurfaceTextMeasurementRecord {
     let layout = publication
         .layout_report()
         .root()
@@ -153,7 +151,10 @@ fn assert_publication_correlation(publication: &SurfacePublication) {
 
     let retained_measurement = retained_text_measurement(publication);
     assert_measurement_lowering(retained_measurement);
-    assert_eq!(retained_measurement.retained_resource_refs(), shaped_refs(publication));
+    assert_eq!(
+        retained_measurement.retained_resource_refs(),
+        shaped_refs(publication)
+    );
 
     let semantics = publication.semantic_publication().snapshot();
     assert_eq!(semantics.nodes().len(), 1);
@@ -193,7 +194,11 @@ fn public_m8d_corpus_correlates_layout_text_paint_and_semantics() {
     let environment = StyleEnvironment::default();
 
     let wide = publish(&mut runtime, &environment, 420, RasterScale::ONE);
-    assert!(runtime.last_surface_phase_report().contains(SurfacePhase::Layout));
+    assert!(
+        runtime
+            .last_surface_phase_report()
+            .contains(SurfacePhase::Layout)
+    );
     assert_publication_correlation(&wide);
     assert_eq!(
         retained_text_measurement(&wide).decision(),
@@ -207,7 +212,11 @@ fn public_m8d_corpus_correlates_layout_text_paint_and_semantics() {
         .height();
 
     let narrow = publish(&mut runtime, &environment, 120, RasterScale::ONE);
-    assert!(runtime.last_surface_phase_report().contains(SurfacePhase::Layout));
+    assert!(
+        runtime
+            .last_surface_phase_report()
+            .contains(SurfacePhase::Layout)
+    );
     assert_publication_correlation(&narrow);
     assert_eq!(
         retained_text_measurement(&narrow).decision(),
