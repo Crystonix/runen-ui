@@ -56,9 +56,7 @@ impl UiApp for VisualApp {
             text(SAMPLE).id("m8d.size24").typography(typography(24)),
             text(SAMPLE).id("m8d.size32").typography(typography(32)),
             text(SAMPLE).id("m8d.size48").typography(typography(48)),
-            text(WRAP_SAMPLE)
-                .id("m8d.wrap")
-                .typography(typography(24)),
+            text(WRAP_SAMPLE).id("m8d.wrap").typography(typography(24)),
             Element::new(CompositionProof),
         ])
         .background(BACKGROUND)
@@ -133,9 +131,7 @@ fn publish(
 ) -> SurfacePublication {
     let styles = StyleEnvironment::default();
     runtime
-        .publish_surface(
-            &SurfaceBuildContext::tight(&styles, size).with_raster_scale(scale),
-        )
+        .publish_surface(&SurfaceBuildContext::tight(&styles, size).with_raster_scale(scale))
         .unwrap_or_else(|_| unreachable!("controlled visual publication is admitted"))
 }
 
@@ -218,8 +214,13 @@ fn render_panel(
     publication: SurfacePublication,
 ) -> Result<Panel, Box<dyn std::error::Error>> {
     let provider = ExternalImagesOnly::default();
-    let readback = renderer.render_offscreen_publication(publication.paint_publication(), &provider)?;
-    assert_eq!(provider.loads.get(), 0, "text realization is publication-owned");
+    let readback =
+        renderer.render_offscreen_publication(publication.paint_publication(), &provider)?;
+    assert_eq!(
+        provider.loads.get(),
+        0,
+        "text realization is publication-owned"
+    );
     assert!(!shaped_refs(&publication).is_empty());
     assert!(!readback.observation().resource_observations().is_empty());
     assert!(
@@ -381,18 +382,12 @@ fn real_wgpu_m8d_contact_sheet_covers_responsive_multiscript_text()
 
     let mut narrow_runtime = visual_runtime("narrow production corpus");
     let narrow_one_publication = publish(&mut narrow_runtime, narrow, one);
-    let narrow_one = render_panel(
-        &mut renderer,
-        "narrow 1x",
-        narrow_one_publication,
-    )?;
+    let narrow_one = render_panel(&mut renderer, "narrow 1x", narrow_one_publication)?;
     let narrow_refs = shaped_refs(&narrow_one.publication);
     assert!(renderer.discard_resource_cache());
     let provider = ExternalImagesOnly::default();
-    let retry = renderer.render_offscreen_publication(
-        narrow_one.publication.paint_publication(),
-        &provider,
-    )?;
+    let retry = renderer
+        .render_offscreen_publication(narrow_one.publication.paint_publication(), &provider)?;
     assert_eq!(provider.loads.get(), 0);
     assert!(
         retry
@@ -402,11 +397,7 @@ fn real_wgpu_m8d_contact_sheet_covers_responsive_multiscript_text()
             .any(|observation| observation.cache_outcome() == ResourceCacheOutcome::Realized)
     );
     let narrow_two_publication = publish(&mut narrow_runtime, narrow, two);
-    let narrow_two = render_panel(
-        &mut renderer,
-        "narrow 2x",
-        narrow_two_publication,
-    )?;
+    let narrow_two = render_panel(&mut renderer, "narrow 2x", narrow_two_publication)?;
     assert_eq!(shaped_refs(&narrow_two.publication), narrow_refs);
     assert_eq!(
         narrow_two.publication.frame(),
