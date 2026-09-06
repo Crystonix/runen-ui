@@ -123,6 +123,7 @@ fn assert_measurement_lowering(record: &SurfaceTextMeasurementRecord) {
             assert_eq!(constraints.max_inline(), None);
             assert!(!constraints.is_min_content());
         }
+        (None, _) => panic!("M8D corpus encountered an unsupported future available-space variant"),
     }
     assert!(record.measured_size().width() > 0.0);
     assert!(record.measured_size().height() > 0.0);
