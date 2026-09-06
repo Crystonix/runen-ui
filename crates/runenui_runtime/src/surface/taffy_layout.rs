@@ -30,7 +30,9 @@ use taffy::{
 };
 
 use super::resolve::{ResolvedSurfaceNode, ResolvedSurfaceTree};
-use super::{LayoutOverflow, SurfaceLayoutNode, SurfaceLayoutReport};
+use super::{
+    LayoutOverflow, SurfaceLayoutNode, SurfaceLayoutReport, SurfaceTextMeasurementRecord,
+};
 use crate::{AxisLimit, LayoutConstraints};
 
 pub(super) fn layout_resolved_surface<Action>(
@@ -73,6 +75,7 @@ struct LayoutKernel<'a, Action> {
     // PerformLayout callback is the final request for that callback sequence;
     // retaining its state avoids any post-layout geometry-based identity guess.
     final_text_states: Vec<Option<TextLayoutState>>,
+    text_measurements: Vec<Vec<SurfaceTextMeasurementRecord>>,
     diagnostics: Vec<Vec<runenui_core::WidgetDiagnostic>>,
     intrinsic_sizes: Vec<LogicalSize>,
     custom_intrinsic_sizes: Vec<Option<LogicalSize>>,
@@ -131,6 +134,7 @@ impl<'a, Action> LayoutKernel<'a, Action> {
             layouts: vec![Layout::default(); count],
             text_layouts,
             final_text_states: vec![None; count],
+            text_measurements: vec![Vec::new(); count],
             diagnostics,
             intrinsic_sizes: vec![LogicalSize::ZERO; count],
             custom_intrinsic_sizes: vec![None; count],
@@ -197,10 +201,30 @@ impl<'a, Action> LayoutKernel<'a, Action> {
                 let mut state = self.text_layouts[index].clone();
                 match self.text_system.layout_text(&mut state, &request) {
                     Ok(outcome) => {
+                        let decision = outcome.decision();
                         let artifact = outcome.artifact();
                         let text_size = artifact.size();
                         baselines = text_baselines(artifact, padding);
-                        if inputs.run_mode == RunMode::PerformLayout {
+                        let retained_for_paint = inputs.run_mode == RunMode::PerformLayout;
+                        let retained_resource_refs = if retained_for_paint {
+                            artifact
+                                .lines()
+                                .iter()
+                                .flat_map(|line| line.runs())
+                                .map(|run| run.resource_ref().clone())
+                                .collect()
+                        } else {
+                            Vec::new()
+                        };
+                        self.text_measurements[index].push(SurfaceTextMeasurementRecord::new(
+                            widget_input,
+                            constraints,
+                            decision,
+                            text_size,
+                            retained_for_paint,
+                            retained_resource_refs,
+                        ));
+                        if retained_for_paint {
                             self.final_text_states[index] = Some(state.clone());
                         }
                         text_size
@@ -357,6 +381,7 @@ impl<'a, Action> LayoutKernel<'a, Action> {
                     overflow,
                 )
                 .with_extents(node_size, desired_content, scrollable_extent)
+                .with_text_measurements(std::mem::take(&mut self.text_measurements[index]))
                 .with_diagnostics(std::mem::take(&mut self.diagnostics[index])),
             );
         }
