@@ -5,6 +5,17 @@ use std::{fs, path::Path};
 const TAFFY_LAYOUT: &str = "crates/runenui_runtime/src/surface/taffy_layout.rs";
 const PLANNING: &str = "crates/runenui_runtime/src/surface/planning.rs";
 const RESOLVE: &str = "crates/runenui_runtime/src/surface/resolve.rs";
+const CURRENT_RENDERER_AUTHORITY: [&str; 3] = [
+    "crates/runenui_render_wgpu/README.md",
+    "crates/runenui_render_wgpu/src/lib.rs",
+    "examples/counter/README.md",
+];
+const PRODUCTION_SOURCE_ROOTS: [&str; 4] = [
+    "crates/runenui_core/src",
+    "crates/runenui_text/src",
+    "crates/runenui_runtime/src",
+    "crates/runenui_render_wgpu/src",
+];
 
 #[test]
 fn production_text_measurement_and_paint_share_one_retained_artifact_path() -> Result<(), String> {
@@ -85,6 +96,54 @@ fn runtime_layout_has_one_bounded_taffy_entrypoint_without_parallel_stabilizatio
         return Err(format!(
             "M8D requires one retained dirty-layout phase call site; found {retained_layout_calls} in {PLANNING}"
         ));
+    }
+    Ok(())
+}
+
+#[test]
+fn proof_era_renderer_and_showcase_authority_is_not_current() -> Result<(), String> {
+    let root = workspace_root()?;
+    for relative in CURRENT_RENDERER_AUTHORITY {
+        let content = read(&root.join(relative))?;
+        for forbidden in [
+            "M7A",
+            "M7B",
+            "does not render glyphs",
+            "literal fill paint only",
+            "future surface drawing",
+        ] {
+            if content.contains(forbidden) {
+                return Err(format!(
+                    "M8D current authority {relative} still presents proof-era renderer/showcase wording `{forbidden}`"
+                ));
+            }
+        }
+    }
+
+    for relative in PRODUCTION_SOURCE_ROOTS {
+        assert_rust_tree_omits(&root.join(relative), "ShapedRunRaster")?;
+    }
+    Ok(())
+}
+
+fn assert_rust_tree_omits(directory: &Path, forbidden: &str) -> Result<(), String> {
+    let entries = fs::read_dir(directory)
+        .map_err(|error| format!("failed to read {}: {error}", directory.display()))?;
+    for entry in entries {
+        let path = entry
+            .map_err(|error| format!("failed to inspect {}: {error}", directory.display()))?
+            .path();
+        if path.is_dir() {
+            assert_rust_tree_omits(&path, forbidden)?;
+        } else if path.extension().and_then(|extension| extension.to_str()) == Some("rs") {
+            let content = read(&path)?;
+            if content.contains(forbidden) {
+                return Err(format!(
+                    "M8D production source {} still contains replaced authority `{forbidden}`",
+                    path.display()
+                ));
+            }
+        }
     }
     Ok(())
 }

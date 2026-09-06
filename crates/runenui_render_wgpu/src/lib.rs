@@ -1,8 +1,11 @@
-//! Reusable renderer edge over ordinary public `RunenUI` paint publications.
+//! Reusable concrete wgpu renderer edge over ordinary public `RunenUI` paint publications.
 //!
-//! This crate is intentionally outside `runenui_core` and `runenui_runtime`
-//! authority. Native event-loop and accessibility integration are separate M7
-//! slices; renderer-side realization state must remain disposable.
+//! The crate owns disposable GPU realization, offscreen/native target state,
+//! external-image realization, retained shaped-text SDF/MSDF realization, readback,
+//! presentation, and renderer observations. It remains outside `runenui_core` and
+//! `runenui_runtime` authority and does not own widget behavior, semantics, mounted
+//! state, text shaping/line breaking, logical layout, accessibility, or a native
+//! event loop.
 
 #![forbid(unsafe_code)]
 
