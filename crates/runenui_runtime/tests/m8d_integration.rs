@@ -103,8 +103,7 @@ fn assert_publication_correlation(publication: &SurfacePublication) {
         layout.authored_id().map(runenui_core::ElementId::as_str),
         Some("copy")
     );
-    assert_eq!(frame.bounds().width(), layout.layout_extent().width());
-    assert_eq!(frame.bounds().height(), layout.layout_extent().height());
+    assert_eq!(frame.bounds().size(), layout.layout_extent());
 
     let semantics = publication.semantic_publication().snapshot();
     assert_eq!(semantics.nodes().len(), 1);
