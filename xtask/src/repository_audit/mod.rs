@@ -26,8 +26,7 @@ const REUSABLE_RUST_WORKFLOW: &str = "reusable-rust-cargo-validate.yml";
 const ACTIVE_WORKFLOW_DIRECTORY: &str = ".github/workflows";
 const CI_WORKFLOW_PATH: &str = ".github/workflows/ci.yml";
 const VISUAL_CONFORMANCE_WORKFLOW_PATH: &str = ".github/workflows/visual-conformance.yml";
-const VISUAL_CONFORMANCE_PROOF_PATH: &str =
-    "crates/runenui_render_wgpu/tests/m8d_visual.rs";
+const VISUAL_CONFORMANCE_PROOF_PATH: &str = "crates/runenui_render_wgpu/tests/m8d_visual.rs";
 const ISSUE_TEMPLATE_DIRECTORY: &str = ".github/ISSUE_TEMPLATE";
 const MIGRATION_HISTORY_PATH: &str = "docs/history/public-repository-migration.md";
 
