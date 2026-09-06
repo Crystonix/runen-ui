@@ -3,6 +3,7 @@
 use core::{future::Future, pin::pin, task::Poll};
 use std::{
     cell::Cell,
+    fmt::Write as _,
     fs,
     path::{Path, PathBuf},
     task::Context,
@@ -227,7 +228,9 @@ fn render_panel(
         readback
             .readback()
             .rgba8_srgb()
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| {
                 pixel[0] != BACKGROUND.red()
                     || pixel[1] != BACKGROUND.green()
@@ -274,7 +277,7 @@ fn write_evidence(
         .max(panels[3].readback.readback().extent().height());
     let height = first_row_height + gap + second_row_height;
     let mut sheet = vec![0_u8; usize::try_from(width)? * usize::try_from(height)? * 4];
-    for pixel in sheet.chunks_exact_mut(4) {
+    for pixel in sheet.as_chunks_mut::<4>().0 {
         pixel.copy_from_slice(&[
             BACKGROUND.red(),
             BACKGROUND.green(),
@@ -327,20 +330,22 @@ fn write_evidence(
     manifest.push_str(
         "The CI evidence command also runs shaped_text.rs, whose intrinsic COLR/SVG/bitmap fixtures must remain explicit diagnostics.\n\n",
     );
-    manifest.push_str(&format!(
-        "adapter={:?}\n",
+    writeln!(
+        manifest,
+        "adapter={:?}",
         renderer.diagnostics().adapter_info()
-    ));
+    )?;
     for panel in panels {
         let extent = panel.readback.readback().extent();
-        manifest.push_str(&format!(
-            "{}: physical={}x{} shaped_refs={} resource_observations={}\n",
+        writeln!(
+            manifest,
+            "{}: physical={}x{} shaped_refs={} resource_observations={}",
             panel.name,
             extent.width(),
             extent.height(),
             shaped_refs(&panel.publication).len(),
             panel.readback.observation().resource_observations().len(),
-        ));
+        )?;
     }
     fs::write(directory.join("m8d-production-text-evidence.txt"), manifest)?;
     Ok(())
