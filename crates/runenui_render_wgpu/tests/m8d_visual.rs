@@ -49,12 +49,16 @@ impl UiApp for VisualApp {
 
     fn root(label: &Self::State) -> Element<Self::Action> {
         column(children![
-            text(label.clone()).typography(typography(16)),
-            text(SAMPLE).typography(typography(16)),
-            text(SAMPLE).typography(typography(24)),
-            text(SAMPLE).typography(typography(32)),
-            text(SAMPLE).typography(typography(48)),
-            text(WRAP_SAMPLE).typography(typography(24)),
+            text(label.clone())
+                .id("m8d.label")
+                .typography(typography(16)),
+            text(SAMPLE).id("m8d.size16").typography(typography(16)),
+            text(SAMPLE).id("m8d.size24").typography(typography(24)),
+            text(SAMPLE).id("m8d.size32").typography(typography(32)),
+            text(SAMPLE).id("m8d.size48").typography(typography(48)),
+            text(WRAP_SAMPLE)
+                .id("m8d.wrap")
+                .typography(typography(24)),
             Element::new(CompositionProof),
         ])
         .background(BACKGROUND)
@@ -104,7 +108,8 @@ impl Widget<()> for CompositionProof {
     }
 }
 
-fn register_fonts(runtime: &mut AppRuntime<VisualApp>) {
+fn visual_runtime(label: &str) -> AppRuntime<VisualApp> {
+    let mut runtime = AppRuntime::<VisualApp>::mount(label.to_owned());
     for bytes in [CANTARELL, ARABIC, DEVANAGARI] {
         assert!(runtime.register_text_font_bytes(bytes.to_vec()).is_ok());
     }
@@ -118,11 +123,14 @@ fn register_fonts(runtime: &mut AppRuntime<VisualApp>) {
             .set_text_generic_family_mapping(GenericFontFamily::SansSerif, &families)
             .is_ok()
     );
+    runtime
 }
 
-fn publish(label: &str, size: LogicalSize, scale: RasterScale) -> SurfacePublication {
-    let mut runtime = AppRuntime::<VisualApp>::mount(label.to_owned());
-    register_fonts(&mut runtime);
+fn publish(
+    runtime: &mut AppRuntime<VisualApp>,
+    size: LogicalSize,
+    scale: RasterScale,
+) -> SurfacePublication {
     let styles = StyleEnvironment::default();
     runtime
         .publish_surface(
@@ -143,6 +151,20 @@ fn shaped_refs(publication: &SurfacePublication) -> Vec<runenui_core::ResourceRe
                 .map(|run| run.resource_ref().clone())
         })
         .collect()
+}
+
+fn authored_height(publication: &SurfacePublication, authored_id: &str) -> f32 {
+    publication
+        .frame()
+        .nodes()
+        .iter()
+        .find(|node| {
+            node.authored_id()
+                .is_some_and(|id| id.as_str() == authored_id)
+        })
+        .unwrap_or_else(|| unreachable!("visual corpus authored node is published"))
+        .bounds()
+        .height()
 }
 
 #[derive(Default)]
@@ -193,10 +215,8 @@ struct Panel {
 fn render_panel(
     renderer: &mut Renderer,
     name: &'static str,
-    logical_size: LogicalSize,
-    scale: RasterScale,
+    publication: SurfacePublication,
 ) -> Result<Panel, Box<dyn std::error::Error>> {
-    let publication = publish(name, logical_size, scale);
     let provider = ExternalImagesOnly::default();
     let readback = renderer.render_offscreen_publication(publication.paint_publication(), &provider)?;
     assert_eq!(provider.loads.get(), 0, "text realization is publication-owned");
@@ -207,9 +227,11 @@ fn render_panel(
             .readback()
             .rgba8_srgb()
             .chunks_exact(4)
-            .any(|pixel| pixel[0] != BACKGROUND.red()
-                || pixel[1] != BACKGROUND.green()
-                || pixel[2] != BACKGROUND.blue()),
+            .any(|pixel| {
+                pixel[0] != BACKGROUND.red()
+                    || pixel[1] != BACKGROUND.green()
+                    || pixel[2] != BACKGROUND.blue()
+            }),
         "real renderer output must contain more than the root background"
     );
     Ok(Panel {
@@ -292,11 +314,22 @@ fn write_evidence(
     let mut manifest = String::new();
     manifest.push_str("M8D real-wgpu production text evidence\n\n");
     manifest.push_str("Panel order: narrow 1x | narrow 2x; wide 1x | wide 2x.\n");
-    manifest.push_str("Every panel uses ordinary runtime layout/text/publication and renderer SDF/MSDF realization.\n");
-    manifest.push_str("Text corpus includes Latin AV/O8, Arabic سلام, Devanagari क्षि, and 16/24/32/48 logical-pixel sizes.\n");
-    manifest.push_str("The blue sample exercises accepted transform + clip + opacity/color composition.\n");
-    manifest.push_str("The CI evidence command also runs shaped_text.rs, whose intrinsic COLR/SVG/bitmap fixtures must remain explicit diagnostics.\n\n");
-    manifest.push_str(&format!("adapter={:?}\n", renderer.diagnostics().adapter_info()));
+    manifest.push_str(
+        "Every panel uses ordinary runtime layout/text/publication and renderer SDF/MSDF realization.\n",
+    );
+    manifest.push_str(
+        "Text corpus includes Latin AV/O8, Arabic سلام, Devanagari क्षि, and 16/24/32/48 logical-pixel sizes.\n",
+    );
+    manifest.push_str(
+        "The blue sample exercises accepted transform + clip + opacity/color composition.\n",
+    );
+    manifest.push_str(
+        "The CI evidence command also runs shaped_text.rs, whose intrinsic COLR/SVG/bitmap fixtures must remain explicit diagnostics.\n\n",
+    );
+    manifest.push_str(&format!(
+        "adapter={:?}\n",
+        renderer.diagnostics().adapter_info()
+    ));
     for panel in panels {
         let extent = panel.readback.readback().extent();
         manifest.push_str(&format!(
@@ -341,12 +374,18 @@ fn real_wgpu_m8d_contact_sheet_covers_responsive_multiscript_text()
     let Some(mut renderer) = renderer_or_skip()? else {
         return Ok(());
     };
-    let narrow = LogicalSize::try_new(280.0, 390.0)?;
-    let wide = LogicalSize::try_new(520.0, 330.0)?;
+    let narrow = LogicalSize::try_new(280.0, 520.0)?;
+    let wide = LogicalSize::try_new(520.0, 520.0)?;
     let one = RasterScale::ONE;
     let two = RasterScale::new(2.0)?;
 
-    let narrow_one = render_panel(&mut renderer, "narrow production corpus", narrow, one)?;
+    let mut narrow_runtime = visual_runtime("narrow production corpus");
+    let narrow_one_publication = publish(&mut narrow_runtime, narrow, one);
+    let narrow_one = render_panel(
+        &mut renderer,
+        "narrow 1x",
+        narrow_one_publication,
+    )?;
     let narrow_refs = shaped_refs(&narrow_one.publication);
     assert!(renderer.discard_resource_cache());
     let provider = ExternalImagesOnly::default();
@@ -355,42 +394,40 @@ fn real_wgpu_m8d_contact_sheet_covers_responsive_multiscript_text()
         &provider,
     )?;
     assert_eq!(provider.loads.get(), 0);
-    assert!(retry
-        .observation()
-        .resource_observations()
-        .iter()
-        .any(|observation| observation.cache_outcome() == ResourceCacheOutcome::Realized));
-
-    let narrow_two = render_panel(&mut renderer, "narrow production corpus", narrow, two)?;
+    assert!(
+        retry
+            .observation()
+            .resource_observations()
+            .iter()
+            .any(|observation| observation.cache_outcome() == ResourceCacheOutcome::Realized)
+    );
+    let narrow_two_publication = publish(&mut narrow_runtime, narrow, two);
+    let narrow_two = render_panel(
+        &mut renderer,
+        "narrow 2x",
+        narrow_two_publication,
+    )?;
     assert_eq!(shaped_refs(&narrow_two.publication), narrow_refs);
     assert_eq!(
         narrow_two.publication.frame(),
         narrow_one.publication.frame(),
         "raster scale must not change logical layout"
     );
-    let wide_one = render_panel(&mut renderer, "wide production corpus", wide, one)?;
-    let wide_two = render_panel(&mut renderer, "wide production corpus", wide, two)?;
+
+    let mut wide_runtime = visual_runtime("wide production corpus");
+    let wide_one_publication = publish(&mut wide_runtime, wide, one);
+    let wide_one = render_panel(&mut renderer, "wide 1x", wide_one_publication)?;
+    let wide_two_publication = publish(&mut wide_runtime, wide, two);
+    let wide_two = render_panel(&mut renderer, "wide 2x", wide_two_publication)?;
     assert_eq!(
         shaped_refs(&wide_two.publication),
         shaped_refs(&wide_one.publication)
     );
     assert_eq!(wide_two.publication.frame(), wide_one.publication.frame());
     assert!(
-        narrow_one
-            .publication
-            .frame()
-            .nodes()
-            .iter()
-            .map(|node| node.bounds().height())
-            .sum::<f32>()
-            > wide_one
-                .publication
-                .frame()
-                .nodes()
-                .iter()
-                .map(|node| node.bounds().height())
-                .sum::<f32>(),
-        "narrow layout must visibly exercise additional text wrapping"
+        authored_height(&narrow_one.publication, "m8d.wrap")
+            > authored_height(&wide_one.publication, "m8d.wrap"),
+        "the exact wrap node must become taller under the narrower production constraint"
     );
 
     let panels = [narrow_one, narrow_two, wide_one, wide_two];
