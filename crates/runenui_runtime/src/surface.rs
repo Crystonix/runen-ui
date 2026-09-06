@@ -28,8 +28,10 @@ use planning::publish_mounted_surface_cached;
 pub(crate) use planning::{SurfacePlanningError, plan_mounted_surface_cached_with_text};
 
 use runenui_core::{
-    ComputedStyle, ElementId, LogicalRect, LogicalSize, WidgetDiagnostic, WidgetTypeId,
+    ComputedStyle, ElementId, LogicalRect, LogicalSize, ResourceRef, WidgetDiagnostic,
+    WidgetMeasureInput, WidgetTypeId,
 };
+use runenui_text::{TextConstraints, TextLayoutDecision};
 
 use crate::style_debug::SurfaceStyleReport;
 use crate::{LayoutConstraints, MountedNodeId};
@@ -174,6 +176,82 @@ impl LayoutOverflow {
     }
 }
 
+/// One successful production text-measurement call that contributed to a retained layout product.
+///
+/// This is a read-only diagnostic correlation record. It does not own text state,
+/// layout authority, or shaped-resource lifetime. `retained_resource_refs` is
+/// populated only for the final callback whose immutable text state was retained
+/// for paint publication.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SurfaceTextMeasurementRecord {
+    input: WidgetMeasureInput,
+    text_constraints: TextConstraints,
+    decision: TextLayoutDecision,
+    measured_size: LogicalSize,
+    retained_for_paint: bool,
+    retained_resource_refs: Vec<ResourceRef>,
+}
+
+impl SurfaceTextMeasurementRecord {
+    pub(crate) const fn new(
+        input: WidgetMeasureInput,
+        text_constraints: TextConstraints,
+        decision: TextLayoutDecision,
+        measured_size: LogicalSize,
+        retained_for_paint: bool,
+        retained_resource_refs: Vec<ResourceRef>,
+    ) -> Self {
+        Self {
+            input,
+            text_constraints,
+            decision,
+            measured_size,
+            retained_for_paint,
+            retained_resource_refs,
+        }
+    }
+
+    /// Returns the exact renderer-neutral known/available-space facts passed to the text leaf.
+    #[must_use]
+    pub const fn input(&self) -> WidgetMeasureInput {
+        self.input
+    }
+
+    /// Returns the exact text-specific constraint projection used by this measurement.
+    #[must_use]
+    pub const fn text_constraints(&self) -> TextConstraints {
+        self.text_constraints
+    }
+
+    /// Returns whether private text work was reused, re-line-broken, or reshaped.
+    #[must_use]
+    pub const fn decision(&self) -> TextLayoutDecision {
+        self.decision
+    }
+
+    /// Returns the exact logical text size returned to the layout algorithm.
+    #[must_use]
+    pub const fn measured_size(&self) -> LogicalSize {
+        self.measured_size
+    }
+
+    /// Returns whether this call supplied the immutable text state retained for paint.
+    #[must_use]
+    pub const fn retained_for_paint(&self) -> bool {
+        self.retained_for_paint
+    }
+
+    /// Returns the ordered shaped-resource identities from the retained artifact.
+    ///
+    /// Non-retained measurement calls return an empty slice. These identities are
+    /// diagnostic copies only; resource lifetime remains owned by the retained text
+    /// state and paint publication.
+    #[must_use]
+    pub const fn retained_resource_refs(&self) -> &[ResourceRef] {
+        self.retained_resource_refs.as_slice()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct SurfaceLayoutNode {
     id: MountedNodeId,
@@ -188,6 +266,7 @@ pub struct SurfaceLayoutNode {
     content_extent: LogicalSize,
     scrollable_extent: LogicalSize,
     overflow: LayoutOverflow,
+    text_measurements: Vec<SurfaceTextMeasurementRecord>,
     diagnostics: Vec<WidgetDiagnostic>,
 }
 
@@ -213,8 +292,17 @@ impl SurfaceLayoutNode {
             content_extent: sizes[0],
             scrollable_extent: sizes[0],
             overflow,
+            text_measurements: Vec::new(),
             diagnostics: Vec::new(),
         }
+    }
+
+    fn with_text_measurements(
+        mut self,
+        text_measurements: Vec<SurfaceTextMeasurementRecord>,
+    ) -> Self {
+        self.text_measurements = text_measurements;
+        self
     }
 
     fn with_diagnostics(mut self, diagnostics: Vec<WidgetDiagnostic>) -> Self {
@@ -295,6 +383,12 @@ impl SurfaceLayoutNode {
     #[must_use]
     pub const fn overflow(&self) -> LayoutOverflow {
         self.overflow
+    }
+
+    /// Returns the ordered successful text-measurement calls that produced this retained layout.
+    #[must_use]
+    pub const fn text_measurements(&self) -> &[SurfaceTextMeasurementRecord] {
+        self.text_measurements.as_slice()
     }
 
     #[must_use]
