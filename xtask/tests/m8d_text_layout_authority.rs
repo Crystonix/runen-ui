@@ -66,7 +66,11 @@ fn runtime_layout_has_one_bounded_taffy_entrypoint_without_parallel_stabilizatio
             "M8D runtime layout no longer enters Taffy through the reviewed root call".to_owned(),
         );
     }
-    for forbidden in ["measure_until_stable", "layout_until_stable", "stabilization_loop"] {
+    for forbidden in [
+        "measure_until_stable",
+        "layout_until_stable",
+        "stabilization_loop",
+    ] {
         if taffy_layout.contains(forbidden) {
             return Err(format!(
                 "M8D forbids a parallel framework stabilization authority: `{forbidden}`"
