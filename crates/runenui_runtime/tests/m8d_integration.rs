@@ -2,11 +2,11 @@
 
 use runenui_core::{
     Element, FontFamilyName, GenericFontFamily, LogicalLength, NoHostProtocol, StyleEnvironment,
-    UiApp, View, text,
+    UiApp, View, WidgetAvailableSpace, text,
 };
 use runenui_runtime::{
-    AppRuntime, AxisConstraints, LayoutConstraints, RasterScale, SurfaceBuildContext,
-    SurfacePublication,
+    AppRuntime, AxisConstraints, LayoutConstraints, RasterScale, SurfaceBuildContext, SurfacePhase,
+    SurfacePublication, SurfaceTextMeasurementRecord, TextLayoutDecision,
 };
 
 const CANTARELL: &[u8] = include_bytes!(concat!(
@@ -85,6 +85,52 @@ fn shaped_refs(publication: &SurfacePublication) -> Vec<runenui_core::ResourceRe
         .collect()
 }
 
+fn retained_text_measurement(
+    publication: &SurfacePublication,
+) -> &SurfaceTextMeasurementRecord {
+    let layout = publication
+        .layout_report()
+        .root()
+        .unwrap_or_else(|| unreachable!("text root has layout facts"));
+    let retained: Vec<_> = layout
+        .text_measurements()
+        .iter()
+        .filter(|record| record.retained_for_paint())
+        .collect();
+    assert_eq!(
+        retained.len(),
+        1,
+        "one final text measurement must own the retained paint artifact"
+    );
+    retained[0]
+}
+
+fn assert_measurement_lowering(record: &SurfaceTextMeasurementRecord) {
+    let input = record.input();
+    let constraints = record.text_constraints();
+    match (input.known_width(), input.available_width()) {
+        (Some(known), _) => {
+            assert_eq!(constraints.max_inline(), Some(known));
+            assert!(!constraints.is_min_content());
+        }
+        (None, WidgetAvailableSpace::Definite(available)) => {
+            assert_eq!(constraints.max_inline(), Some(available));
+            assert!(!constraints.is_min_content());
+        }
+        (None, WidgetAvailableSpace::MinContent) => {
+            assert_eq!(constraints.max_inline(), None);
+            assert!(constraints.is_min_content());
+        }
+        (None, WidgetAvailableSpace::MaxContent) => {
+            assert_eq!(constraints.max_inline(), None);
+            assert!(!constraints.is_min_content());
+        }
+    }
+    assert!(record.measured_size().width() > 0.0);
+    assert!(record.measured_size().height() > 0.0);
+    assert!(!record.retained_resource_refs().is_empty());
+}
+
 fn assert_publication_correlation(publication: &SurfacePublication) {
     let frame = publication
         .frame()
@@ -104,6 +150,10 @@ fn assert_publication_correlation(publication: &SurfacePublication) {
         Some("copy")
     );
     assert_eq!(frame.bounds().size(), layout.layout_extent());
+
+    let retained_measurement = retained_text_measurement(publication);
+    assert_measurement_lowering(retained_measurement);
+    assert_eq!(retained_measurement.retained_resource_refs(), shaped_refs(publication));
 
     let semantics = publication.semantic_publication().snapshot();
     assert_eq!(semantics.nodes().len(), 1);
@@ -143,7 +193,12 @@ fn public_m8d_corpus_correlates_layout_text_paint_and_semantics() {
     let environment = StyleEnvironment::default();
 
     let wide = publish(&mut runtime, &environment, 420, RasterScale::ONE);
+    assert!(runtime.last_surface_phase_report().contains(SurfacePhase::Layout));
     assert_publication_correlation(&wide);
+    assert_eq!(
+        retained_text_measurement(&wide).decision(),
+        TextLayoutDecision::Reshaped
+    );
     let wide_height = wide
         .frame()
         .root()
@@ -152,7 +207,13 @@ fn public_m8d_corpus_correlates_layout_text_paint_and_semantics() {
         .height();
 
     let narrow = publish(&mut runtime, &environment, 120, RasterScale::ONE);
+    assert!(runtime.last_surface_phase_report().contains(SurfacePhase::Layout));
     assert_publication_correlation(&narrow);
+    assert_eq!(
+        retained_text_measurement(&narrow).decision(),
+        TextLayoutDecision::Relinebroken,
+        "width-only feedback should re-line-break retained shaping instead of reshaping"
+    );
     let narrow_height = narrow
         .frame()
         .root()
