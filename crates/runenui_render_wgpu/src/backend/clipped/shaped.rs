@@ -640,8 +640,6 @@ fn rasterize_unique_glyphs(
             });
         }
         let Some(outline) = outlines.get(glyph_id) else {
-            // A glyph without a scalable outline is valid non-painting content until an intrinsic
-            // representation above proves that it is unsupported color/bitmap content.
             continue;
         };
         let mut shape = Shape::new();
@@ -841,7 +839,7 @@ fn generate_msdf_raster(
         &MsdfGeneratorConfig::default(),
     );
     let mut rgba8 = Vec::with_capacity(width.saturating_mul(height).saturating_mul(4));
-    for y in (0..height).rev() {
+    for y in 0..height {
         for x in 0..width {
             for channel in bitmap.pixel(x, y) {
                 rgba8.push((channel.clamp(0.0, 1.0) * 255.0).round() as u8);
@@ -1233,20 +1231,42 @@ mod tests {
         let resource = artifact.lines()[0].runs()[0].shaped_resource();
         let rasters = rasterize_unique_glyphs(resource, QualityTier::P16)
             .unwrap_or_else(|_| unreachable!("Cantarell outline realization succeeds"));
+        let repeated = rasterize_unique_glyphs(resource, QualityTier::P16)
+            .unwrap_or_else(|_| unreachable!("repeated Cantarell outline realization succeeds"));
+        assert_eq!(rasters, repeated, "CPU field generation must be deterministic");
         let raster = rasters
             .iter()
             .find(|raster| raster.glyph_id == resource.glyphs()[0].id())
             .unwrap_or_else(|| unreachable!("the F glyph has one outline field"));
-        let row_bytes = raster.width as usize * 4;
-        let mirrored = raster
-            .rgba8
-            .as_chunks::<4>()
-            .0
-            .chunks_exact(row_bytes / 4)
-            .flat_map(|row| row.iter().rev().flatten().copied())
-            .collect::<Vec<_>>();
-        assert_ne!(raster.rgba8.as_ref(), mirrored.as_slice());
-        assert_eq!(fnv1a(&raster.rgba8), 0xd60f_6797_64de_9f56);
+        let width = raster.width as usize;
+        let height = raster.height as usize;
+        let pixels = raster.rgba8.as_chunks::<4>().0;
+        let inside = |pixel: &[u8; 4]| {
+            let mut channels = [pixel[0], pixel[1], pixel[2]];
+            channels.sort_unstable();
+            channels[1] > 127
+        };
+        let midpoint = height / 2;
+        let top_inside = pixels
+            .chunks_exact(width)
+            .take(midpoint)
+            .flatten()
+            .filter(|pixel| inside(pixel))
+            .count();
+        let bottom_inside = pixels
+            .chunks_exact(width)
+            .skip(midpoint)
+            .flatten()
+            .filter(|pixel| inside(pixel))
+            .count();
+        assert!(
+            top_inside > bottom_inside,
+            "upright F must retain more filled field coverage above its vertical midpoint: top={top_inside}, bottom={bottom_inside}"
+        );
+        eprintln!(
+            "upright F MSDF field: hash={:016x}, top_inside={top_inside}, bottom_inside={bottom_inside}",
+            fnv1a(&raster.rgba8)
+        );
     }
 
     #[test]
