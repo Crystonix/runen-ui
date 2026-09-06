@@ -110,7 +110,12 @@ fn assert_publication_correlation(publication: &SurfacePublication) {
     assert_eq!(semantics.nodes().len(), 1);
     let semantic = &semantics.nodes()[0];
     assert_eq!(semantic.name(), Some(CONTENT));
-    assert_eq!(semantic.text().and_then(runenui_core::SemanticText::as_plain), Some(CONTENT));
+    assert_eq!(
+        semantic
+            .text()
+            .and_then(runenui_core::SemanticText::as_plain),
+        Some(CONTENT)
+    );
     assert_eq!(semantic.bounds(), frame.bounds());
 
     let refs = shaped_refs(publication);
@@ -140,7 +145,12 @@ fn public_m8d_corpus_correlates_layout_text_paint_and_semantics() {
 
     let wide = publish(&mut runtime, &environment, 420, RasterScale::ONE);
     assert_publication_correlation(&wide);
-    let wide_height = wide.frame().root().unwrap_or_else(|| unreachable!()).bounds().height();
+    let wide_height = wide
+        .frame()
+        .root()
+        .unwrap_or_else(|| unreachable!())
+        .bounds()
+        .height();
 
     let narrow = publish(&mut runtime, &environment, 120, RasterScale::ONE);
     assert_publication_correlation(&narrow);
