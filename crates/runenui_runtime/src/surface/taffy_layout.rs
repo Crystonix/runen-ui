@@ -30,9 +30,7 @@ use taffy::{
 };
 
 use super::resolve::{ResolvedSurfaceNode, ResolvedSurfaceTree};
-use super::{
-    LayoutOverflow, SurfaceLayoutNode, SurfaceLayoutReport, SurfaceTextMeasurementRecord,
-};
+use super::{LayoutOverflow, SurfaceLayoutNode, SurfaceLayoutReport, SurfaceTextMeasurementRecord};
 use crate::{AxisLimit, LayoutConstraints};
 
 pub(super) fn layout_resolved_surface<Action>(
