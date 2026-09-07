@@ -207,10 +207,7 @@ impl Bounds {
 
 #[allow(clippy::cast_possible_truncation)]
 fn checked_f32(value: f64) -> Result<f32, ScenePathError> {
-    if !value.is_finite()
-        || value < f64::from(f32::MIN)
-        || value > f64::from(f32::MAX)
-    {
+    if !value.is_finite() || value < f64::from(f32::MIN) || value > f64::from(f32::MAX) {
         return Err(ScenePathError::BoundsOverflow);
     }
     Ok(value as f32)
