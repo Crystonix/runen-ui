@@ -640,6 +640,8 @@ fn rasterize_unique_glyphs(
             });
         }
         let Some(outline) = outlines.get(glyph_id) else {
+            // A glyph without a scalable outline is valid non-painting content until an intrinsic
+            // representation above proves that it is unsupported color/bitmap content.
             continue;
         };
         let mut shape = Shape::new();
