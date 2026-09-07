@@ -2,7 +2,10 @@
 
 use core::cmp::Ordering;
 
-use crate::{LogicalPoint, LogicalRect, PathFillRule, PathVerb, ScenePath};
+use crate::{
+    LogicalPoint, LogicalRect, PathFillRule, PathVerb, ScenePath,
+    path::{cubic, cubic_coefficients, quadratic, quadratic_roots},
+};
 
 impl ScenePath {
     /// Returns whether `point` belongs to the path's logical fill coverage.
@@ -33,9 +36,8 @@ impl ScenePath {
 }
 
 fn inclusive_rect_contains(rect: LogicalRect, point: LogicalPoint) -> bool {
-    let x_inside = point.x() >= rect.x() && point.x() <= rect.max_x();
-    let y_inside = point.y() >= rect.y() && point.y() <= rect.max_y();
-    x_inside && y_inside
+    (rect.x()..=rect.max_x()).contains(&point.x())
+        && (rect.y()..=rect.max_y()).contains(&point.y())
 }
 
 fn fill_state(path: &ScenePath, point: LogicalPoint) -> FillState {
@@ -427,53 +429,6 @@ fn root_bracket(
 
 fn brackets_overlap(first: (f64, f64), second: (f64, f64)) -> bool {
     first.0.next_down() <= second.1.next_up() && second.0.next_down() <= first.1.next_up()
-}
-
-fn quadratic_roots(a: f64, b: f64, c: f64, roots: &mut [f64; 2]) -> usize {
-    if a == 0.0 {
-        if b == 0.0 {
-            return 0;
-        }
-        roots[0] = -c / b;
-        return 1;
-    }
-    let discriminant = b.mul_add(b, -4.0 * a * c);
-    if discriminant < 0.0 {
-        return 0;
-    }
-    if discriminant == 0.0 {
-        roots[0] = -b / (2.0 * a);
-        return 1;
-    }
-    let square_root = discriminant.sqrt();
-    let q = -0.5 * (b + square_root.copysign(b));
-    roots[0] = q / a;
-    roots[1] = c / q;
-    2
-}
-
-fn quadratic(start: f64, control: f64, end: f64, parameter: f64) -> f64 {
-    let quadratic_term = (-2.0_f64).mul_add(control, start) + end;
-    let linear_term = 2.0 * (control - start);
-    quadratic_term
-        .mul_add(parameter, linear_term)
-        .mul_add(parameter, start)
-}
-
-fn cubic_coefficients(start: f64, control1: f64, control2: f64, end: f64) -> [f64; 4] {
-    let cubic_term = (-3.0_f64).mul_add(control2, 3.0_f64.mul_add(control1, -start)) + end;
-    let quadratic_term = 3.0 * ((-2.0_f64).mul_add(control1, start) + control2);
-    let linear_term = 3.0 * (control1 - start);
-    [cubic_term, quadratic_term, linear_term, start]
-}
-
-fn cubic(start: f64, control1: f64, control2: f64, end: f64, parameter: f64) -> f64 {
-    let [cubic_term, quadratic_term, linear_term, constant_term] =
-        cubic_coefficients(start, control1, control2, end);
-    cubic_term
-        .mul_add(parameter, quadratic_term)
-        .mul_add(parameter, linear_term)
-        .mul_add(parameter, constant_term)
 }
 
 #[cfg(test)]
