@@ -2,7 +2,7 @@
 
 > **Category: Current architecture**
 
-[ADR 0009](../adr/0009-production-style-layout-text-foundation.md) owns the accepted M8 architectural decisions. This document records the accepted current implementation of that architecture: M8A establishes deterministic environment, cascade, interaction-state, preference, inheritance, provenance, and invalidation behavior; M8B adds metric typography and production logical text integration; M8C consumes those resolved facts through the production runtime layout path. Broader visual-property and animation/composition breadth remains later work.
+[ADR 0009](../adr/0009-production-style-layout-text-foundation.md) owns the accepted M8 architectural decisions. This document records the accepted current implementation of that architecture: M8A establishes deterministic environment, cascade, interaction-state, preference, inheritance, provenance, and invalidation behavior; M8B adds metric typography and production logical text integration; M8C consumes those resolved facts through the production runtime layout path; M8D proves the resulting style/layout/text facts remain correlated through publication, semantics, and real renderer consumption. Broader visual-property and animation/composition breadth remains later work.
 
 ## Ownership
 
@@ -100,6 +100,8 @@ These are direct effects only. Runtime owns dependency propagation: a layout-aff
 
 Preference/environment or interaction changes first invalidate style resolution as required; exact computed-property differences then determine downstream work. Recoverable or terminally failed surface planning does not commit a partial new retained style cache.
 
+M8D's accepted integration evidence exercises these resolved style facts through the same production surface path as responsive layout/text measurement, exact retained shaped-resource paint, semantic bounds/content, and real-wgpu composition. That proof does not move style resolution into runtime layout, text, semantics, or renderer ownership.
+
 ## Authoring
 
 Typed Rust expressions remain the authoring form. `StyleIntent` may select one recipe, append variants in authored order, and set direct literal/token overrides. Built-in builders and `element!` use the same typed style intent rather than parallel styling languages.
@@ -110,10 +112,10 @@ See [ADR 0001](../adr/0001-typed-token-authoring.md) for token-expression author
 
 The accepted style mechanism does not yet provide borders, shadows, opacity, transforms, external theme serialization/loading, broad renderer material systems, or animation/motion properties. The current theme is an explicit host-neutral value supplied in `StyleEnvironment`; no ambient global theme/provider authority exists.
 
-M8B owns the accepted production logical text/typography boundary. M8C owns the accepted production responsive layout path that consumes layout-affecting style facts. M8D owns integrated style/layout/text closure, while M9 owns broader visual composition and motion/animation behavior.
+M8 owns the accepted production style/layout/text foundation and its integrated closure. M9 owns broader visual composition and motion/animation behavior; later property breadth must preserve the same explicit style ownership and invalidation model rather than creating a parallel cascade.
 
 ## Extraction rule
 
 Host-neutral style values, environment/policy values, pure resolution, computed style, provenance/diagnostics, and direct property-effect classification remain in `runenui_core`; mounted interaction/capability authority, orchestration, retention, and invalidation remain in `runenui_runtime`.
 
-M8A does not justify a `runenui_style` crate. A dedicated crate requires a real independent ownership, dependency, optionality, serialized-source, external-loading, or multiple-consumer boundary that Cargo should enforce; file size or property growth alone is insufficient.
+M8 does not justify a `runenui_style` crate. A dedicated crate requires a real independent ownership, dependency, optionality, serialized-source, external-loading, or multiple-consumer boundary that Cargo should enforce; file size or property growth alone is insufficient.
