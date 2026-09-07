@@ -16,7 +16,7 @@ pub enum PathFillRule {
 }
 
 /// One immutable authored path verb.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PathVerb {
     /// Starts a new contour at the finite point.
     MoveTo(LogicalPoint),
@@ -71,7 +71,7 @@ impl fmt::Display for ScenePathError {
 
 impl Error for ScenePathError {}
 
-/// Immutable validated RunenUI path content.
+/// Immutable validated `RunenUI` path content.
 ///
 /// Identity/equality is structural path content plus fill rule. Shared storage is
 /// an implementation detail and never participates in scene identity. Move-only
@@ -187,7 +187,7 @@ impl Bounds {
         }
     }
 
-    fn include(&mut self, x: f64, y: f64) {
+    const fn include(&mut self, x: f64, y: f64) {
         self.min_x = self.min_x.min(x);
         self.min_y = self.min_y.min(y);
         self.max_x = self.max_x.max(x);
@@ -196,13 +196,24 @@ impl Bounds {
 
     fn rect(self) -> Result<LogicalRect, ScenePathError> {
         LogicalRect::try_new(
-            self.min_x as f32,
-            self.min_y as f32,
-            (self.max_x - self.min_x) as f32,
-            (self.max_y - self.min_y) as f32,
+            checked_f32(self.min_x)?,
+            checked_f32(self.min_y)?,
+            checked_f32(self.max_x - self.min_x)?,
+            checked_f32(self.max_y - self.min_y)?,
         )
         .map_err(|_| ScenePathError::BoundsOverflow)
     }
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn checked_f32(value: f64) -> Result<f32, ScenePathError> {
+    if !value.is_finite()
+        || value < f64::from(f32::MIN)
+        || value > f64::from(f32::MAX)
+    {
+        return Err(ScenePathError::BoundsOverflow);
+    }
+    Ok(value as f32)
 }
 
 fn path_bounds(verbs: &[PathVerb]) -> Result<Option<LogicalRect>, ScenePathError> {
@@ -288,7 +299,7 @@ fn include_quadratic(
                 f64::from(to.y()),
             ),
         };
-        let denominator = p0 - 2.0 * p1 + p2;
+        let denominator = (-2.0_f64).mul_add(p1, p0) + p2;
         if denominator == 0.0 {
             continue;
         }
@@ -336,13 +347,9 @@ fn include_cubic(
                 f64::from(to.y()),
             ),
         };
+        let [a, b, c, _] = cubic_coefficients(p0, p1, p2, p3);
         let mut roots = [0.0_f64; 2];
-        let count = quadratic_roots(
-            3.0 * (-p0 + 3.0 * p1 - 3.0 * p2 + p3),
-            6.0 * (p0 - 2.0 * p1 + p2),
-            3.0 * (p1 - p0),
-            &mut roots,
-        );
+        let count = quadratic_roots(3.0 * a, 2.0 * b, c, &mut roots);
         for &t in &roots[..count] {
             if (0.0..1.0).contains(&t) {
                 ensure_bounds(bounds, from).include(
@@ -392,16 +399,21 @@ fn quadratic_roots(a: f64, b: f64, c: f64, roots: &mut [f64; 2]) -> usize {
 }
 
 fn quadratic(p0: f64, p1: f64, p2: f64, t: f64) -> f64 {
-    let one_minus = 1.0 - t;
-    one_minus * one_minus * p0 + 2.0 * one_minus * t * p1 + t * t * p2
+    let a = (-2.0_f64).mul_add(p1, p0) + p2;
+    let b = 2.0 * (p1 - p0);
+    a.mul_add(t, b).mul_add(t, p0)
+}
+
+fn cubic_coefficients(p0: f64, p1: f64, p2: f64, p3: f64) -> [f64; 4] {
+    let a = (-3.0_f64).mul_add(p2, 3.0_f64.mul_add(p1, -p0)) + p3;
+    let b = 3.0 * ((-2.0_f64).mul_add(p1, p0) + p2);
+    let c = 3.0 * (p1 - p0);
+    [a, b, c, p0]
 }
 
 fn cubic(p0: f64, p1: f64, p2: f64, p3: f64, t: f64) -> f64 {
-    let one_minus = 1.0 - t;
-    one_minus * one_minus * one_minus * p0
-        + 3.0 * one_minus * one_minus * t * p1
-        + 3.0 * one_minus * t * t * p2
-        + t * t * t * p3
+    let [a, b, c, d] = cubic_coefficients(p0, p1, p2, p3);
+    a.mul_add(t, b).mul_add(t, c).mul_add(t, d)
 }
 
 #[cfg(test)]
@@ -492,12 +504,17 @@ mod tests {
             .unwrap_or_else(|| unreachable!("segment-bearing path has bounds"));
         assert_eq!(
             (
-                quadratic_bounds.x(),
-                quadratic_bounds.y(),
-                quadratic_bounds.width(),
-                quadratic_bounds.height(),
+                quadratic_bounds.x().to_bits(),
+                quadratic_bounds.y().to_bits(),
+                quadratic_bounds.width().to_bits(),
+                quadratic_bounds.height().to_bits(),
             ),
-            (0.0, 0.0, 10.0, 5.0)
+            (
+                0.0_f32.to_bits(),
+                0.0_f32.to_bits(),
+                10.0_f32.to_bits(),
+                5.0_f32.to_bits(),
+            )
         );
 
         let cubic_path = ScenePath::new(
@@ -517,12 +534,17 @@ mod tests {
             .unwrap_or_else(|| unreachable!("segment-bearing path has bounds"));
         assert_eq!(
             (
-                cubic_bounds.x(),
-                cubic_bounds.y(),
-                cubic_bounds.width(),
-                cubic_bounds.height(),
+                cubic_bounds.x().to_bits(),
+                cubic_bounds.y().to_bits(),
+                cubic_bounds.width().to_bits(),
+                cubic_bounds.height().to_bits(),
             ),
-            (0.0, 0.0, 10.0, 7.5)
+            (
+                0.0_f32.to_bits(),
+                0.0_f32.to_bits(),
+                10.0_f32.to_bits(),
+                7.5_f32.to_bits(),
+            )
         );
     }
 

@@ -91,7 +91,9 @@ impl ImageCrop {
         if width == UnitInterval::ZERO || height == UnitInterval::ZERO {
             return Err(ImageCropError::Empty);
         }
-        if x.get() + width.get() > 1.0 || y.get() + height.get() > 1.0 {
+        if f64::from(x.get()) + f64::from(width.get()) > 1.0
+            || f64::from(y.get()) + f64::from(height.get()) > 1.0
+        {
             return Err(ImageCropError::OutsideSource);
         }
         Ok(Self {
@@ -177,7 +179,7 @@ pub enum ImageFit {
 }
 
 /// Complete immutable logical image identity plus intrinsic metadata.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ImageDescriptor {
     resource: ResourceRef,
     intrinsic_size: ImageIntrinsicSize,
@@ -465,11 +467,11 @@ impl ImagePaintDescriptor {
 #[cfg(test)]
 mod tests {
     use super::{
-        ImageAlignment, ImageCrop, ImageDescriptor, ImageDestinationInsets, ImageFit,
-        ImageIntrinsicSize, ImageMapping, ImageMappingError, ImagePaintDescriptor,
+        ImageAlignment, ImageCrop, ImageCropError, ImageDescriptor, ImageDestinationInsets,
+        ImageFit, ImageIntrinsicSize, ImageMapping, ImageMappingError, ImagePaintDescriptor,
         ImageSourceInsets,
     };
-    use crate::{LogicalRect, ResourceKind, ResourceRef};
+    use crate::{LogicalRect, ResourceKind, ResourceRef, UnitInterval};
 
     #[test]
     fn image_descriptor_preserves_resource_identity_across_mapping() {
@@ -493,6 +495,18 @@ mod tests {
         )
         .unwrap_or_else(|_| unreachable!("test mapping is valid"));
         assert_eq!(paint.image().resource_ref(), &resource);
+    }
+
+    #[test]
+    fn crop_validation_uses_wider_arithmetic_at_the_source_boundary() {
+        let start = UnitInterval::new(0.999_999_94)
+            .unwrap_or_else(|_| unreachable!("test start is normalized"));
+        let width = UnitInterval::new(0.000_000_1)
+            .unwrap_or_else(|_| unreachable!("test width is normalized"));
+        assert_eq!(
+            ImageCrop::new(start, UnitInterval::ZERO, width, UnitInterval::ONE),
+            Err(ImageCropError::OutsideSource)
+        );
     }
 
     #[test]

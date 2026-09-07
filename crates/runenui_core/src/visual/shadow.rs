@@ -92,9 +92,9 @@ mod tests {
     fn signed_spread_is_finite_and_preserved() {
         let shadow = DropShadow::new(1.0, -2.0, LogicalLength::ZERO, -3.0, Color::BLACK)
             .unwrap_or_else(|_| unreachable!("test shadow is finite"));
-        assert_eq!(shadow.spread(), -3.0);
-        assert_eq!(shadow.offset_x(), 1.0);
-        assert_eq!(shadow.offset_y(), -2.0);
+        assert_eq!(shadow.spread().to_bits(), (-3.0_f32).to_bits());
+        assert_eq!(shadow.offset_x().to_bits(), 1.0_f32.to_bits());
+        assert_eq!(shadow.offset_y().to_bits(), (-2.0_f32).to_bits());
         assert_eq!(
             DropShadow::new(f32::NAN, 0.0, LogicalLength::ZERO, 0.0, Color::BLACK),
             Err(NonFiniteVisualScalar)
