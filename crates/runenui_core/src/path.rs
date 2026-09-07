@@ -408,9 +408,13 @@ fn cubic_coefficients(p0: f64, p1: f64, p2: f64, p3: f64) -> [f64; 4] {
     [a, b, c, p0]
 }
 
-fn cubic(p0: f64, p1: f64, p2: f64, p3: f64, t: f64) -> f64 {
-    let [a, b, c, d] = cubic_coefficients(p0, p1, p2, p3);
-    a.mul_add(t, b).mul_add(t, c).mul_add(t, d)
+fn cubic(p0: f64, p1: f64, p2: f64, p3: f64, parameter: f64) -> f64 {
+    let [cubic_term, quadratic_term, linear_term, constant_term] =
+        cubic_coefficients(p0, p1, p2, p3);
+    cubic_term
+        .mul_add(parameter, quadratic_term)
+        .mul_add(parameter, linear_term)
+        .mul_add(parameter, constant_term)
 }
 
 #[cfg(test)]
