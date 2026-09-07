@@ -278,14 +278,25 @@ fn reference_target(
     None
 }
 
-fn reference_shape_contains(shape: SceneShape, point: LogicalPoint) -> bool {
-    let rect = shape.outer_rect();
+fn reference_shape_contains(shape: &SceneShape, point: LogicalPoint) -> bool {
+    match shape {
+        SceneShape::Rect(rect) => reference_rect_contains(*rect, point),
+        SceneShape::RoundedRect { rect, radius } => {
+            reference_rounded_rect_contains(*rect, *radius, point)
+        }
+        SceneShape::Ellipse(rect) => reference_ellipse_contains(*rect, point),
+        SceneShape::Path(path) => path.contains_fill(point),
+    }
+}
+
+fn reference_rounded_rect_contains(
+    rect: LogicalRect,
+    radius: Radius,
+    point: LogicalPoint,
+) -> bool {
     if !reference_rect_contains(rect, point) {
         return false;
     }
-    let Some(radius) = shape.radius() else {
-        return true;
-    };
 
     let radii = reference_normalized_radii(rect, radius);
     let x = f64::from(point.x());
@@ -330,6 +341,19 @@ fn reference_shape_contains(shape: SceneShape, point: LogicalPoint) -> bool {
         }
     }
     true
+}
+
+fn reference_ellipse_contains(rect: LogicalRect, point: LogicalPoint) -> bool {
+    if rect.width() == 0.0 || rect.height() == 0.0 {
+        return false;
+    }
+    let radius_x = f64::from(rect.width()) / 2.0;
+    let radius_y = f64::from(rect.height()) / 2.0;
+    let center_x = f64::from(rect.x()) + radius_x;
+    let center_y = f64::from(rect.y()) + radius_y;
+    let normalized_x = (f64::from(point.x()) - center_x) / radius_x;
+    let normalized_y = (f64::from(point.y()) - center_y) / radius_y;
+    normalized_x.mul_add(normalized_x, normalized_y * normalized_y) <= 1.0
 }
 
 fn reference_rect_contains(rect: LogicalRect, point: LogicalPoint) -> bool {
