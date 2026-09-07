@@ -9,6 +9,7 @@ Configured matrices:
 - [M6 conformance matrix](m6-conformance-matrix.md)
 - [M7 conformance matrix](m7-conformance-matrix.md)
 - [M8 conformance matrix](m8-conformance-matrix.md)
+- [M9 conformance matrix](m9-conformance-matrix.md)
 
 Supporting accepted contract material:
 
