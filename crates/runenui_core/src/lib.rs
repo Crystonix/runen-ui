@@ -228,6 +228,7 @@ mod identity;
 mod input;
 mod layout;
 mod paint;
+mod path;
 mod pointer;
 pub mod prelude;
 mod resource;
@@ -243,6 +244,7 @@ mod style_tokens;
 mod subscription;
 mod typography;
 mod value;
+mod visual;
 mod widget_context;
 mod widget_erasure;
 mod widget_mapping;
@@ -284,6 +286,7 @@ pub use paint::{
     ImagePrimitive, PaintContribution, PaintContributionContext, PaintContributionItem,
     PaintPrimitive, ShapedTextRunPrimitive,
 };
+pub use path::{PathFillRule, PathVerb, ScenePath, ScenePathError};
 /// Unstable safe bridge from transient core elements to the mounted runtime.
 ///
 /// This namespace is public only because core and runtime are separate Rust
@@ -359,6 +362,13 @@ pub use typography::{
     Typography,
 };
 pub use value::{LogicalLength, LogicalLengthError};
+pub use visual::{
+    Brush, DropShadow, GradientGeometryError, GradientStop, GradientStops, GradientStopsError,
+    ImageAlignment, ImageCrop, ImageCropError, ImageDescriptor, ImageDestinationInsets, ImageFit,
+    ImageIntrinsicSize, ImageMapping, ImageMappingError, ImagePaintDescriptor, ImageSourceInsets,
+    ImageSourceInsetsError, LinearGradient, NonFiniteVisualScalar, RadialGradient, StrokeCap,
+    StrokeJoin, StrokeStyle, StrokeStyleError, UnitInterval, UnitIntervalError,
+};
 pub use widget_context::{
     WidgetActivationContext, WidgetInvalidation, WidgetMountContext, WidgetUnmountContext,
     WidgetUnmountReason, WidgetUpdateContext,
