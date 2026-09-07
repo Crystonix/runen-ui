@@ -2,16 +2,15 @@
 
 > **Category:** Target architecture
 >
-> **Status:** M8A, M8B, and M8C owner-accepted; M8D remains blocked
+> **Status:** M8 owner-accepted
 >
 > **Milestone:** M8
 >
 > **Reviewed baseline:** `1a5af89c1886654d859f56d1d8afe3e46abdcf95`
 >
-> The accepted M8 target contract remains normative. M8A, M8B, and M8C are normative for
-> their twenty-seven owner-accepted rows after exact-head owner acceptance, squash merge,
-> and accepted-main validation. M8D remains blocked until its own accepted implementation
-> and proof obligations land.
+> The accepted M8 target contract remains normative. M8A, M8B, M8C, and M8D are
+> normative for all thirty-three owner-accepted rows after exact-head owner acceptance,
+> squash merge, and accepted-main validation of their implementation slices.
 
 [ADR 0009](../adr/0009-production-style-layout-text-foundation.md) owns M8
 architecture. M3 owns mounted runtime/layout authority and invalidation; M4 owns
@@ -21,10 +20,10 @@ integration. This matrix references inherited contracts rather than duplicating 
 
 ```text
 33 total unique rows
-27 owner-accepted
+33 owner-accepted
 0 implementation-complete
 0 proof-complete
-6 blocked
+0 blocked
 0 duplicate IDs
 0 invalid statuses
 0 invalid schemas
@@ -86,16 +85,17 @@ satisfy M8.
 
 | ID | Required observation | Positive proof owner | Negative proof owner | Diagnostic / trace proof owner | Delivery slice | Status | Gate |
 |---|---|---|---|---|---|---|---|
-| M8INTEG-01 | Taffy leaf measurement lowers exact known/available-space facts into deterministic text-layout requests; text metrics feed the same bounded layout computation with no open-ended framework measure-until-stable loop. | Width-feedback/convergence corpus | Independent text/layout loop and unbounded iteration corpus | Measure-call/reflow/layout-phase records | M8D | blocked | Required |
-| M8INTEG-02 | The exact logical text artifact/resource facts used for measurement reach owner-local paint contribution; final paint never independently reshapes/rebreaks or remints the same authored text/span set. | Measurement-to-paint identity corpus | Paint-time remint/reshape and stale-artifact corpus | Node/artifact/resource correlation records | M8D | blocked | Required |
-| M8INTEG-03 | Deterministic public headless tests use bundled fonts, fixed locale/preferences/constraints, and ordinary public runtime/text contracts; no ambient system font, private expected runtime, alternate layout engine, or software expected renderer is required. | Headless production-contract corpus | Ambient-font/private-model/alternate-engine audit | Fixture/provider/version diagnostics | M8D | blocked | Required |
-| M8INTEG-04 | Semantic text/content and bounds remain owned by accepted semantic publication and exact final layout; text/layout integrations neither allocate semantic identity nor introduce a second accessibility tree/action path. | Text semantic/bounds corpus | Parley-AccessKit, glyph-derived semantic identity, and stale-bounds audit | Semantic/layout correlation records | M8D | blocked | Required |
-| M8INTEG-05 | Real wgpu offscreen/native proof renders the exact logical shaped resources produced by production measurement/layout through the accepted SDF/MSDF path, including retained-publication retry and raster-scale/quality changes, without renderer-owned shaping/layout. | Integrated responsive/text-heavy SDF/MSDF render corpus | Debug/software/renderer-shaping, alpha-fallback, and resource-rebinding audit | Runtime/text/renderer correlation records | M8D | blocked | Required |
-| M8INTEG-06 | Proof-era scalar-count text measurement, linear-only layout authority, and M7 scale-specific alpha `ShapedRunRaster` production authority are removed after cutover; current docs/status/API expose one production path and no compatibility bridge silently preserves replaced authority. | Source/API/authority cleanup corpus | Duplicate-provider/legacy-layout/alpha-text/compatibility-shim audit | Repository authority and deprecation audit | M8D | blocked | Required |
+| M8INTEG-01 | Taffy leaf measurement lowers exact known/available-space facts into deterministic text-layout requests; text metrics feed the same bounded layout computation with no open-ended framework measure-until-stable loop. | Width-feedback/convergence corpus | Independent text/layout loop and unbounded iteration corpus | Measure-call/reflow/layout-phase records | M8D | owner-accepted | Required |
+| M8INTEG-02 | The exact logical text artifact/resource facts used for measurement reach owner-local paint contribution; final paint never independently reshapes/rebreaks or remints the same authored text/span set. | Measurement-to-paint identity corpus | Paint-time remint/reshape and stale-artifact corpus | Node/artifact/resource correlation records | M8D | owner-accepted | Required |
+| M8INTEG-03 | Deterministic public headless tests use bundled fonts, fixed locale/preferences/constraints, and ordinary public runtime/text contracts; no ambient system font, private expected runtime, alternate layout engine, or software expected renderer is required. | Headless production-contract corpus | Ambient-font/private-model/alternate-engine audit | Fixture/provider/version diagnostics | M8D | owner-accepted | Required |
+| M8INTEG-04 | Semantic text/content and bounds remain owned by accepted semantic publication and exact final layout; text/layout integrations neither allocate semantic identity nor introduce a second accessibility tree/action path. | Text semantic/bounds corpus | Parley-AccessKit, glyph-derived semantic identity, and stale-bounds audit | Semantic/layout correlation records | M8D | owner-accepted | Required |
+| M8INTEG-05 | Real wgpu offscreen/native proof renders the exact logical shaped resources produced by production measurement/layout through the accepted SDF/MSDF path, including retained-publication retry and raster-scale/quality changes, without renderer-owned shaping/layout. | Integrated responsive/text-heavy SDF/MSDF render corpus | Debug/software/renderer-shaping, alpha-fallback, and resource-rebinding audit | Runtime/text/renderer correlation records | M8D | owner-accepted | Required |
+| M8INTEG-06 | Proof-era scalar-count text measurement, linear-only layout authority, and M7 scale-specific alpha `ShapedRunRaster` production authority are removed after cutover; current docs/status/API expose one production path and no compatibility bridge silently preserves replaced authority. | Source/API/authority cleanup corpus | Duplicate-provider/legacy-layout/alpha-text/compatibility-shim audit | Repository authority and deprecation audit | M8D | owner-accepted | Required |
 
 ## Closure rule
 
-M8 closes only after all 33 rows are `owner-accepted` on accepted default branch and
-final M8 closure reconciliation is itself accepted-main validated. Later M9/M10 work
-does not justify weakening M8 style/layout/text ownership; M10 editing builds on the
-accepted M8 text artifacts rather than replacing their shaping/layout authority.
+M8 is conformance-complete when all 33 rows are `owner-accepted` on accepted default
+branch. Milestone closure additionally requires the final M8 reconciliation itself to
+be accepted-main validated. Later M9/M10 work does not justify weakening M8
+style/layout/text ownership; M10 editing builds on the accepted M8 text artifacts
+rather than replacing their shaping/layout authority.
