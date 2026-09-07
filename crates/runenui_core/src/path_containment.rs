@@ -61,14 +61,7 @@ impl ScenePath {
                     let Some(from) = current else {
                         unreachable!("validated path segment always has a current point")
                     };
-                    state.include(
-                        Segment::Quadratic {
-                            from,
-                            control,
-                            to,
-                        },
-                        point,
-                    );
+                    state.include(Segment::Quadratic { from, control, to }, point);
                     if state.boundary {
                         return true;
                     }
@@ -224,14 +217,12 @@ impl Segment {
                 let start = coordinate(from);
                 (coordinate(to) - start).mul_add(parameter, start)
             }
-            Self::Quadratic { from, control, to } => {
-                quadratic(
-                    coordinate(from),
-                    coordinate(control),
-                    coordinate(to),
-                    parameter,
-                )
-            }
+            Self::Quadratic { from, control, to } => quadratic(
+                coordinate(from),
+                coordinate(control),
+                coordinate(to),
+                parameter,
+            ),
             Self::Cubic {
                 from,
                 control1,
@@ -304,12 +295,7 @@ impl Segment {
                     coordinate(control2),
                     coordinate(to),
                 );
-                quadratic_roots(
-                    3.0 * cubic_term,
-                    2.0 * quadratic_term,
-                    linear_term,
-                    roots,
-                )
+                quadratic_roots(3.0 * cubic_term, 2.0 * quadratic_term, linear_term, roots)
             }
         }
     }
@@ -343,13 +329,7 @@ fn interval_contribution(
         return IntervalContribution::None;
     };
 
-    let bracket = root_bracket(
-        segment,
-        Axis::Y,
-        point_y,
-        start_parameter,
-        end_parameter,
-    );
+    let bracket = root_bracket(segment, Axis::Y, point_y, start_parameter, end_parameter);
     let start_x = segment.evaluate(Axis::X, bracket.0);
     let end_x = segment.evaluate(Axis::X, bracket.1);
     let min_x = start_x.min(end_x);
@@ -389,25 +369,15 @@ fn point_on_monotonic_interval(
     let x_constant = start_x.total_cmp(&end_x) == Ordering::Equal;
     let y_constant = start_y.total_cmp(&end_y) == Ordering::Equal;
     match (x_constant, y_constant) {
-        (true, true) => point_x.total_cmp(&start_x) == Ordering::Equal
-            && point_y.total_cmp(&start_y) == Ordering::Equal,
+        (true, true) => {
+            point_x.total_cmp(&start_x) == Ordering::Equal
+                && point_y.total_cmp(&start_y) == Ordering::Equal
+        }
         (true, false) => point_x.total_cmp(&start_x) == Ordering::Equal,
         (false, true) => point_y.total_cmp(&start_y) == Ordering::Equal,
         (false, false) => {
-            let x_bracket = root_bracket(
-                segment,
-                Axis::X,
-                point_x,
-                start_parameter,
-                end_parameter,
-            );
-            let y_bracket = root_bracket(
-                segment,
-                Axis::Y,
-                point_y,
-                start_parameter,
-                end_parameter,
-            );
+            let x_bracket = root_bracket(segment, Axis::X, point_x, start_parameter, end_parameter);
+            let y_bracket = root_bracket(segment, Axis::Y, point_y, start_parameter, end_parameter);
             brackets_overlap(x_bracket, y_bracket)
         }
     }
@@ -436,9 +406,7 @@ fn root_bracket(
 
     for _ in 0..96 {
         let middle = (low + high) * 0.5;
-        if middle.total_cmp(&low) == Ordering::Equal
-            || middle.total_cmp(&high) == Ordering::Equal
-        {
+        if middle.total_cmp(&low) == Ordering::Equal || middle.total_cmp(&high) == Ordering::Equal {
             break;
         }
         let value = segment.evaluate(axis, middle);
@@ -565,6 +533,23 @@ mod tests {
     }
 
     #[test]
+    fn opposite_winding_contours_cancel_under_non_zero() {
+        let opposite_squares = vec![
+            PathVerb::MoveTo(point(0.0, 0.0)),
+            PathVerb::LineTo(point(10.0, 0.0)),
+            PathVerb::LineTo(point(10.0, 10.0)),
+            PathVerb::LineTo(point(0.0, 10.0)),
+            PathVerb::Close,
+            PathVerb::MoveTo(point(0.0, 0.0)),
+            PathVerb::LineTo(point(0.0, 10.0)),
+            PathVerb::LineTo(point(10.0, 10.0)),
+            PathVerb::LineTo(point(10.0, 0.0)),
+            PathVerb::Close,
+        ];
+        assert!(!path(opposite_squares, PathFillRule::NonZero).contains_fill(point(5.0, 5.0)));
+    }
+
+    #[test]
     fn quadratic_and_cubic_boundaries_are_inside_without_flattening() {
         let quadratic_arch = path(
             vec![
@@ -577,6 +562,8 @@ mod tests {
             PathFillRule::NonZero,
         );
         assert!(quadratic_arch.contains_fill(point(5.0, 5.0)));
+        assert!(quadratic_arch.contains_fill(point(2.5, 3.75)));
+        assert!(!quadratic_arch.contains_fill(point(2.5, 3.75_f32.next_up())));
         assert!(quadratic_arch.contains_fill(point(5.0, 2.0)));
         assert!(!quadratic_arch.contains_fill(point(5.0, 6.0)));
 
