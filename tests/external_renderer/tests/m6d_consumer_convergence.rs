@@ -289,11 +289,7 @@ fn reference_shape_contains(shape: &SceneShape, point: LogicalPoint) -> bool {
     }
 }
 
-fn reference_rounded_rect_contains(
-    rect: LogicalRect,
-    radius: Radius,
-    point: LogicalPoint,
-) -> bool {
+fn reference_rounded_rect_contains(rect: LogicalRect, radius: Radius, point: LogicalPoint) -> bool {
     if !reference_rect_contains(rect, point) {
         return false;
     }
