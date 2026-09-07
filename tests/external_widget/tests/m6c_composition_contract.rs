@@ -209,7 +209,7 @@ fn paint_scene_composes_self_contained_values_exact_order_and_conjunctive_clips(
     );
     assert_eq!(
         red.clips()[0].shape(),
-        SceneShape::rect(rect(0.0, 0.0, 8.0, 9.0))
+        &SceneShape::rect(rect(0.0, 0.0, 8.0, 9.0))
     );
 
     let owner_x = first_owner.bounds().x();

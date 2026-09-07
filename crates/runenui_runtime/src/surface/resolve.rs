@@ -298,7 +298,7 @@ fn compose_scene_clips(
                 false,
             ));
         }
-        composed.push(SceneClip::new(clip.shape(), clip_to_surface));
+        composed.push(SceneClip::new(clip.shape().clone(), clip_to_surface));
     }
     Some(composed)
 }
@@ -481,7 +481,7 @@ pub(super) fn resolve_hit_test(
                 contribution_local_order,
                 HitTestRegion::new(
                     node.id.clone(),
-                    region.shape(),
+                    region.shape().clone(),
                     local_to_surface,
                     clips,
                     region.layer(),

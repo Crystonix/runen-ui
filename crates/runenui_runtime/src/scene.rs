@@ -12,7 +12,7 @@ use runenui_text::{ShapedTextLease, ShapedTextResource};
 use crate::surface::RasterScale;
 
 /// One self-contained conjunctive scene clip in surface-logical coordinates.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SceneClip {
     shape: SceneShape,
     clip_to_surface: LogicalTransform,
@@ -26,15 +26,15 @@ impl SceneClip {
         }
     }
 
-    /// Returns the exact logical clip shape.
+    /// Returns the exact logical clip shape without manufacturing another owned copy.
     #[must_use]
-    pub const fn shape(self) -> SceneShape {
-        self.shape
+    pub const fn shape(&self) -> &SceneShape {
+        &self.shape
     }
 
     /// Returns the exact clip-local to surface-logical transform.
     #[must_use]
-    pub const fn clip_to_surface(self) -> LogicalTransform {
+    pub const fn clip_to_surface(&self) -> LogicalTransform {
         self.clip_to_surface
     }
 
@@ -43,7 +43,7 @@ impl SceneClip {
     /// A non-invertible clip transform excludes coverage rather than making the
     /// clip disappear or falling back to untransformed geometry.
     #[must_use]
-    pub fn contains_surface_point(self, point: LogicalPoint) -> bool {
+    pub fn contains_surface_point(&self, point: LogicalPoint) -> bool {
         self.clip_to_surface
             .inverse()
             .and_then(|surface_to_clip| surface_to_clip.transform_point(point))
@@ -330,10 +330,10 @@ impl HitTestRegion {
         &self.target
     }
 
-    /// Returns the exact logical region shape.
+    /// Returns the exact logical region shape without manufacturing another owned copy.
     #[must_use]
-    pub const fn shape(&self) -> SceneShape {
-        self.shape
+    pub const fn shape(&self) -> &SceneShape {
+        &self.shape
     }
 
     /// Returns the exact region-local to surface-logical transform.

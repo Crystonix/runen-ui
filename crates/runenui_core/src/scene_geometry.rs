@@ -2,7 +2,7 @@
 
 use core::{error::Error, fmt, num::FpCategory};
 
-use crate::{LogicalPoint, LogicalRect, Radius};
+use crate::{LogicalPoint, LogicalRect, Radius, ScenePath};
 
 /// Error returned when an affine logical transform contains a non-finite component.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -242,13 +242,22 @@ impl From<i64> for SceneLayer {
     }
 }
 
-/// Shared logical shape used by M6 paint clips and hit regions.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// Shared renderer-neutral logical shape used by paint clips and physical hit regions.
+///
+/// Rectangle and rounded-rectangle containment preserves the inherited M6
+/// half-open right/bottom rule. Positive ellipses and structural paths use the
+/// inclusive analytic/fill boundaries frozen by ADR 0011. The value is
+/// intentionally non-`Copy` because a path owns immutable structural content.
+#[derive(Clone, Debug, PartialEq)]
 pub enum SceneShape {
     /// Half-open logical rectangle.
     Rect(LogicalRect),
     /// Half-open logical rectangle with four normalized circular corner radii.
     RoundedRect { rect: LogicalRect, radius: Radius },
+    /// Analytic ellipse centered within the supplied finite logical rectangle.
+    Ellipse(LogicalRect),
+    /// Immutable structural path evaluated under its authored fill rule.
+    Path(ScenePath),
 }
 
 impl SceneShape {
@@ -264,46 +273,36 @@ impl SceneShape {
         Self::RoundedRect { rect, radius }
     }
 
-    /// Returns the outer half-open logical rectangle.
+    /// Creates one analytic ellipse inside the supplied logical rectangle.
     #[must_use]
-    pub const fn outer_rect(self) -> LogicalRect {
-        match self {
-            Self::Rect(rect) | Self::RoundedRect { rect, .. } => rect,
-        }
+    pub const fn ellipse(rect: LogicalRect) -> Self {
+        Self::Ellipse(rect)
+    }
+
+    /// Creates one structural path scene shape without changing path identity.
+    #[must_use]
+    pub fn path(path: ScenePath) -> Self {
+        Self::Path(path)
     }
 
     /// Returns authored circular corner radii for a rounded rectangle.
     #[must_use]
-    pub const fn radius(self) -> Option<Radius> {
+    pub const fn radius(&self) -> Option<Radius> {
         match self {
-            Self::Rect(_) => None,
-            Self::RoundedRect { radius, .. } => Some(radius),
+            Self::RoundedRect { radius, .. } => Some(*radius),
+            Self::Rect(_) | Self::Ellipse(_) | Self::Path(_) => None,
         }
     }
 
-    /// Applies the exact M6 half-open rectangle / normalized circular-corner rule.
+    /// Applies the exact framework-owned logical fill-containment contract.
     #[must_use]
-    pub fn contains(self, point: LogicalPoint) -> bool {
-        let rect = self.outer_rect();
-        if !rect.contains(point) {
-            return false;
+    pub fn contains(&self, point: LogicalPoint) -> bool {
+        match self {
+            Self::Rect(rect) => rect.contains(point),
+            Self::RoundedRect { rect, radius } => rounded_rect_contains(*rect, *radius, point),
+            Self::Ellipse(rect) => ellipse_contains(*rect, point),
+            Self::Path(path) => path.contains_fill(point),
         }
-        let Self::RoundedRect { radius, .. } = self else {
-            return true;
-        };
-
-        let radii = normalized_radii(rect, radius);
-        let left = f64::from(rect.x());
-        let top = f64::from(rect.y());
-        let right = f64::from(rect.max_x());
-        let bottom = f64::from(rect.max_y());
-        let x = f64::from(point.x());
-        let y = f64::from(point.y());
-
-        !outside_rounded_corner(x, y, left, top, radii[0], Corner::TopLeft)
-            && !outside_rounded_corner(x, y, right, top, radii[1], Corner::TopRight)
-            && !outside_rounded_corner(x, y, right, bottom, radii[2], Corner::BottomRight)
-            && !outside_rounded_corner(x, y, left, bottom, radii[3], Corner::BottomLeft)
     }
 }
 
@@ -312,7 +311,7 @@ impl SceneShape {
 /// The transform maps clip-local geometry into the contributing owner's local
 /// logical space. Runtime composes owner placement before publishing a surface
 /// clip; widgets never author clip-to-surface placement directly.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ContributionClip {
     shape: SceneShape,
     local_to_owner: LogicalTransform,
@@ -334,17 +333,60 @@ impl ContributionClip {
         Self::new(shape, LogicalTransform::IDENTITY)
     }
 
-    /// Returns the logical clip shape.
+    /// Returns the logical clip shape without manufacturing another owned copy.
     #[must_use]
-    pub const fn shape(self) -> SceneShape {
-        self.shape
+    pub const fn shape(&self) -> &SceneShape {
+        &self.shape
     }
 
     /// Returns clip-local to owner-local transform.
     #[must_use]
-    pub const fn local_to_owner(self) -> LogicalTransform {
+    pub const fn local_to_owner(&self) -> LogicalTransform {
         self.local_to_owner
     }
+}
+
+fn rounded_rect_contains(rect: LogicalRect, radius: Radius, point: LogicalPoint) -> bool {
+    if !rect.contains(point) {
+        return false;
+    }
+
+    let radii = normalized_radii(rect, radius);
+    let left = f64::from(rect.x());
+    let top = f64::from(rect.y());
+    let right = f64::from(rect.max_x());
+    let bottom = f64::from(rect.max_y());
+    let x = f64::from(point.x());
+    let y = f64::from(point.y());
+
+    !outside_rounded_corner(x, y, left, top, radii[0], Corner::TopLeft)
+        && !outside_rounded_corner(x, y, right, top, radii[1], Corner::TopRight)
+        && !outside_rounded_corner(x, y, right, bottom, radii[2], Corner::BottomRight)
+        && !outside_rounded_corner(x, y, left, bottom, radii[3], Corner::BottomLeft)
+}
+
+fn ellipse_contains(rect: LogicalRect, point: LogicalPoint) -> bool {
+    if rect.width() == 0.0 || rect.height() == 0.0 {
+        return false;
+    }
+
+    let left = f64::from(rect.x());
+    let top = f64::from(rect.y());
+    let width = f64::from(rect.width());
+    let height = f64::from(rect.height());
+    let right = left + width;
+    let bottom = top + height;
+    let x = f64::from(point.x());
+    let y = f64::from(point.y());
+    if x < left || x > right || y < top || y > bottom {
+        return false;
+    }
+
+    let radius_x = width * 0.5;
+    let radius_y = height * 0.5;
+    let normalized_x = (x - (left + radius_x)) / radius_x;
+    let normalized_y = (y - (top + radius_y)) / radius_y;
+    normalized_x.mul_add(normalized_x, normalized_y * normalized_y) <= 1.0
 }
 
 #[derive(Clone, Copy)]
@@ -426,7 +468,13 @@ mod tests {
         ContributionClip, LogicalTransform, LogicalTransformError, SceneLayer, SceneOpacity,
         SceneOpacityError, SceneShape,
     };
-    use crate::{LogicalLength, LogicalPoint, LogicalRect, Radius};
+    use crate::{
+        LogicalLength, LogicalPoint, LogicalRect, PathFillRule, PathVerb, Radius, ScenePath,
+    };
+
+    fn point(x: f32, y: f32) -> LogicalPoint {
+        LogicalPoint::new(x, y).unwrap_or_else(|_| unreachable!("test point is finite"))
+    }
 
     #[test]
     fn transform_validation_rejects_non_finite_components() {
@@ -440,10 +488,8 @@ mod tests {
     fn translation_maps_logical_points_exactly() {
         let transform = LogicalTransform::translation(5.0, -3.0)
             .unwrap_or_else(|_| unreachable!("test translation is finite"));
-        let point =
-            LogicalPoint::new(2.0, 7.0).unwrap_or_else(|_| unreachable!("test point is finite"));
         let mapped = transform
-            .transform_point(point)
+            .transform_point(point(2.0, 7.0))
             .unwrap_or_else(|| unreachable!("test mapping remains finite"));
         assert_eq!((mapped.x(), mapped.y()), (7.0, 4.0));
     }
@@ -457,8 +503,7 @@ mod tests {
         let combined = translate
             .then(scale)
             .unwrap_or_else(|_| unreachable!("test composition is finite"));
-        let point =
-            LogicalPoint::new(2.0, 7.0).unwrap_or_else(|_| unreachable!("test point is finite"));
+        let point = point(2.0, 7.0);
         let sequential = scale
             .transform_point(
                 translate
@@ -479,8 +524,7 @@ mod tests {
         let inverse = transform
             .inverse()
             .unwrap_or_else(|| unreachable!("test transform is invertible"));
-        let point =
-            LogicalPoint::new(3.0, 5.0).unwrap_or_else(|_| unreachable!("test point is finite"));
+        let point = point(3.0, 5.0);
         let mapped = transform
             .transform_point(point)
             .and_then(|mapped| inverse.transform_point(mapped))
@@ -511,28 +555,67 @@ mod tests {
             .unwrap_or_else(|_| unreachable!("test rectangle is valid"));
         let ten = LogicalLength::new(10.0).unwrap_or_else(|_| unreachable!("test radius is valid"));
         let shape = SceneShape::rounded_rect(rect, Radius::all(ten));
-        let inside_arc_boundary =
-            LogicalPoint::new(0.0, 5.0).unwrap_or_else(|_| unreachable!("test point is valid"));
-        let outside_corner =
-            LogicalPoint::new(0.0, 0.0).unwrap_or_else(|_| unreachable!("test point is valid"));
-        assert!(shape.contains(inside_arc_boundary));
-        assert!(!shape.contains(outside_corner));
+        assert!(shape.contains(point(0.0, 5.0)));
+        assert!(!shape.contains(point(0.0, 0.0)));
     }
 
     #[test]
-    fn scene_shape_keeps_outer_half_open_edges_and_clip_space_explicit() {
+    fn rectangle_keeps_half_open_edges_and_clip_space_explicit() {
         let rect = LogicalRect::try_new(2.0, 3.0, 4.0, 5.0)
             .unwrap_or_else(|_| unreachable!("test rectangle is valid"));
         let shape = SceneShape::rect(rect);
-        let inside =
-            LogicalPoint::new(5.999, 7.999).unwrap_or_else(|_| unreachable!("test point is valid"));
-        let right =
-            LogicalPoint::new(6.0, 4.0).unwrap_or_else(|_| unreachable!("test point is valid"));
-        assert!(shape.contains(inside));
-        assert!(!shape.contains(right));
+        assert!(shape.contains(point(5.999, 7.999)));
+        assert!(!shape.contains(point(6.0, 4.0)));
         assert_eq!(
             ContributionClip::identity(shape).local_to_owner(),
             LogicalTransform::IDENTITY
         );
+    }
+
+    #[test]
+    fn ellipse_uses_inclusive_analytic_boundary_and_zero_extent_is_empty() {
+        let rect = LogicalRect::try_new(2.0, 3.0, 8.0, 4.0)
+            .unwrap_or_else(|_| unreachable!("test rectangle is valid"));
+        let ellipse = SceneShape::ellipse(rect);
+        for boundary in [
+            point(2.0, 5.0),
+            point(10.0, 5.0),
+            point(6.0, 3.0),
+            point(6.0, 7.0),
+        ] {
+            assert!(ellipse.contains(boundary));
+        }
+        assert!(ellipse.contains(point(6.0, 5.0)));
+        assert!(!ellipse.contains(point(10.0_f32.next_up(), 5.0)));
+        assert!(!ellipse.contains(point(6.0, 7.0_f32.next_up())));
+
+        let circle_rect = LogicalRect::try_new(0.0, 0.0, 10.0, 10.0)
+            .unwrap_or_else(|_| unreachable!("test circle bounds are valid"));
+        let circle = SceneShape::ellipse(circle_rect);
+        assert!(circle.contains(point(8.0, 9.0)));
+
+        let zero_width = LogicalRect::try_new(2.0, 3.0, 0.0, 4.0)
+            .unwrap_or_else(|_| unreachable!("test rectangle is valid"));
+        let zero_height = LogicalRect::try_new(2.0, 3.0, 8.0, 0.0)
+            .unwrap_or_else(|_| unreachable!("test rectangle is valid"));
+        assert!(!SceneShape::ellipse(zero_width).contains(point(2.0, 5.0)));
+        assert!(!SceneShape::ellipse(zero_height).contains(point(6.0, 3.0)));
+    }
+
+    #[test]
+    fn path_shape_delegates_to_framework_owned_fill_containment() {
+        let path = ScenePath::new(
+            vec![
+                PathVerb::MoveTo(point(0.0, 0.0)),
+                PathVerb::LineTo(point(10.0, 0.0)),
+                PathVerb::LineTo(point(0.0, 10.0)),
+            ],
+            PathFillRule::NonZero,
+        )
+        .unwrap_or_else(|_| unreachable!("test path is valid"));
+        let shape = SceneShape::path(path);
+        assert!(shape.contains(point(1.0, 1.0)));
+        assert!(shape.contains(point(5.0, 5.0)));
+        assert!(!shape.contains(point(9.0, 9.0)));
     }
 }
