@@ -225,7 +225,7 @@ impl ShapedRunRenderer {
                     },
                     count: None,
                 },
-                wgpu::BindGroupLayoutEntry {
+                wgpu::BindGroupEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
@@ -1227,7 +1227,7 @@ mod tests {
 
     #[test]
     fn asymmetric_glyph_field_has_stable_orientation_proof() {
-        let (_system, artifact) = shaped_resource("F");
+        let (_system, artifact) = shaped_resource("T");
         let resource = artifact.lines()[0].runs()[0].shaped_resource();
         let rasters = rasterize_unique_glyphs(resource, QualityTier::P16)
             .unwrap_or_else(|_| unreachable!("Cantarell outline realization succeeds"));
@@ -1240,7 +1240,7 @@ mod tests {
         let raster = rasters
             .iter()
             .find(|raster| raster.glyph_id == resource.glyphs()[0].id())
-            .unwrap_or_else(|| unreachable!("the F glyph has one outline field"));
+            .unwrap_or_else(|| unreachable!("the T glyph has one outline field"));
         let width = raster.width as usize;
         let height = raster.height as usize;
         let pixels = raster.rgba8.as_chunks::<4>().0;
@@ -1249,25 +1249,19 @@ mod tests {
             channels.sort_unstable();
             channels[1] > 127
         };
+        let row_widths = pixels
+            .chunks_exact(width)
+            .map(|row| row.iter().filter(|pixel| inside(pixel)).count())
+            .collect::<Vec<_>>();
         let midpoint = height / 2;
-        let top_inside = pixels
-            .chunks_exact(width)
-            .take(midpoint)
-            .flatten()
-            .filter(|pixel| inside(pixel))
-            .count();
-        let bottom_inside = pixels
-            .chunks_exact(width)
-            .skip(midpoint)
-            .flatten()
-            .filter(|pixel| inside(pixel))
-            .count();
+        let top_widest = row_widths[..midpoint].iter().copied().max().unwrap_or(0);
+        let bottom_widest = row_widths[midpoint..].iter().copied().max().unwrap_or(0);
         assert!(
-            top_inside > bottom_inside,
-            "upright F must retain more filled field coverage above its vertical midpoint: top={top_inside}, bottom={bottom_inside}"
+            top_widest > bottom_widest,
+            "upright T must retain a wider filled MSDF row above its vertical midpoint: top={top_widest}, bottom={bottom_widest}"
         );
         eprintln!(
-            "upright F MSDF field: hash={:016x}, top_inside={top_inside}, bottom_inside={bottom_inside}",
+            "upright T MSDF field: hash={:016x}, top_widest={top_widest}, bottom_widest={bottom_widest}",
             fnv1a(&raster.rgba8)
         );
     }
