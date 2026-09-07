@@ -118,7 +118,7 @@ impl ScenePath {
         self.fill_rule
     }
 
-    /// Returns deterministic tight segment bounds when at least one authored
+    /// Returns deterministic conservative segment bounds when at least one authored
     /// segment exists. Empty/move-only paths return `None`.
     #[must_use]
     pub const fn logical_bounds(&self) -> Option<LogicalRect> {
@@ -195,13 +195,14 @@ impl Bounds {
     }
 
     fn rect(self) -> Result<LogicalRect, ScenePathError> {
-        LogicalRect::try_new(
-            checked_f32(self.min_x)?,
-            checked_f32(self.min_y)?,
-            checked_f32(self.max_x - self.min_x)?,
-            checked_f32(self.max_y - self.min_y)?,
-        )
-        .map_err(|_| ScenePathError::BoundsOverflow)
+        let min_x = checked_f32_down(self.min_x)?;
+        let min_y = checked_f32_down(self.min_y)?;
+        let max_x = checked_f32_up(self.max_x)?;
+        let max_y = checked_f32_up(self.max_y)?;
+        let width = checked_f32_up(f64::from(max_x) - f64::from(min_x))?;
+        let height = checked_f32_up(f64::from(max_y) - f64::from(min_y))?;
+        LogicalRect::try_new(min_x, min_y, width, height)
+            .map_err(|_| ScenePathError::BoundsOverflow)
     }
 }
 
@@ -211,6 +212,24 @@ fn checked_f32(value: f64) -> Result<f32, ScenePathError> {
         return Err(ScenePathError::BoundsOverflow);
     }
     Ok(value as f32)
+}
+
+fn checked_f32_down(value: f64) -> Result<f32, ScenePathError> {
+    let rounded = checked_f32(value)?;
+    if f64::from(rounded) > value {
+        Ok(rounded.next_down())
+    } else {
+        Ok(rounded)
+    }
+}
+
+fn checked_f32_up(value: f64) -> Result<f32, ScenePathError> {
+    let rounded = checked_f32(value)?;
+    if f64::from(rounded) < value {
+        Ok(rounded.next_up())
+    } else {
+        Ok(rounded)
+    }
 }
 
 fn path_bounds(verbs: &[PathVerb]) -> Result<Option<LogicalRect>, ScenePathError> {
@@ -419,7 +438,7 @@ fn cubic(p0: f64, p1: f64, p2: f64, p3: f64, parameter: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{PathFillRule, PathVerb, ScenePath, ScenePathError};
+    use super::{PathFillRule, PathVerb, ScenePath, ScenePathError, checked_f32, quadratic};
     use crate::LogicalPoint;
 
     fn point(x: f32, y: f32) -> LogicalPoint {
@@ -547,6 +566,38 @@ mod tests {
                 7.5_f32.to_bits(),
             )
         );
+    }
+
+    #[test]
+    fn nonrepresentable_curve_extrema_round_bounds_outward() {
+        let path = ScenePath::new(
+            vec![
+                PathVerb::MoveTo(point(0.0, 0.0)),
+                PathVerb::QuadraticTo {
+                    control: point(-1.0, 1.0),
+                    to: point(0.3, -0.3),
+                },
+            ],
+            PathFillRule::NonZero,
+        )
+        .unwrap_or_else(|_| unreachable!("test path is valid"));
+        let bounds = path
+            .logical_bounds()
+            .unwrap_or_else(|| unreachable!("segment-bearing path has bounds"));
+
+        let endpoint = f64::from(0.3_f32);
+        let parameter = 1.0 / (2.0 + endpoint);
+        let exact_min_x = quadratic(0.0, -1.0, endpoint, parameter);
+        let exact_max_y = quadratic(0.0, 1.0, -endpoint, parameter);
+        let nearest_min_x = checked_f32(exact_min_x)
+            .unwrap_or_else(|_| unreachable!("test extremum is representable"));
+        let nearest_max_y = checked_f32(exact_max_y)
+            .unwrap_or_else(|_| unreachable!("test extremum is representable"));
+
+        assert!(f64::from(nearest_min_x) > exact_min_x);
+        assert!(f64::from(nearest_max_y) < exact_max_y);
+        assert!(f64::from(bounds.x()) <= exact_min_x);
+        assert!(f64::from(bounds.max_y()) >= exact_max_y);
     }
 
     #[test]
