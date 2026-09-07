@@ -259,10 +259,7 @@ impl ImageSourceInsets {
         bottom: f32,
         left: f32,
     ) -> Result<Self, ImageSourceInsetsError> {
-        if ![top, right, bottom, left]
-            .into_iter()
-            .all(f32::is_finite)
-        {
+        if ![top, right, bottom, left].into_iter().all(f32::is_finite) {
             return Err(ImageSourceInsetsError::NotFinite);
         }
         if [top, right, bottom, left]
@@ -428,12 +425,13 @@ impl ImagePaintDescriptor {
             ..
         } = mapping
         {
-            let source_width = f64::from(image.intrinsic_size().width())
-                * f64::from(source.width().get());
-            let source_height = f64::from(image.intrinsic_size().height())
-                * f64::from(source.height().get());
+            let source_width =
+                f64::from(image.intrinsic_size().width()) * f64::from(source.width().get());
+            let source_height =
+                f64::from(image.intrinsic_size().height()) * f64::from(source.height().get());
             if f64::from(source_insets.left()) + f64::from(source_insets.right()) > source_width
-                || f64::from(source_insets.top()) + f64::from(source_insets.bottom()) > source_height
+                || f64::from(source_insets.top()) + f64::from(source_insets.bottom())
+                    > source_height
             {
                 return Err(ImageMappingError::OverlappingSourceInsets);
             }

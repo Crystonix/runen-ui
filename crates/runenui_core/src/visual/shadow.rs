@@ -40,10 +40,7 @@ impl DropShadow {
         spread: f32,
         color: Color,
     ) -> Result<Self, NonFiniteVisualScalar> {
-        if ![offset_x, offset_y, spread]
-            .into_iter()
-            .all(f32::is_finite)
-        {
+        if ![offset_x, offset_y, spread].into_iter().all(f32::is_finite) {
             return Err(NonFiniteVisualScalar);
         }
         Ok(Self {
