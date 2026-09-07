@@ -53,6 +53,8 @@ pub enum ScenePathError {
     AlreadyClosed,
     /// A segment followed an explicit close without a new move.
     SegmentAfterClose,
+    /// Segment-bearing path bounds cannot be represented by a finite logical rectangle.
+    BoundsOverflow,
 }
 
 impl fmt::Display for ScenePathError {
@@ -62,6 +64,7 @@ impl fmt::Display for ScenePathError {
             Self::CloseWithoutSegment => "path close requires a segment-bearing open contour",
             Self::AlreadyClosed => "path contour is already closed",
             Self::SegmentAfterClose => "path segment after close requires a new move",
+            Self::BoundsOverflow => "path logical bounds exceed the finite logical rectangle range",
         })
     }
 }
@@ -71,7 +74,10 @@ impl Error for ScenePathError {}
 /// Immutable validated RunenUI path content.
 ///
 /// Identity/equality is structural path content plus fill rule. Shared storage is
-/// an implementation detail and never participates in scene identity.
+/// an implementation detail and never participates in scene identity. Move-only
+/// contours are valid but have no coverage. Open segment-bearing contours remain
+/// structurally open: ADR 0011's synthetic closing edge exists only during fill
+/// evaluation and is never inserted into authored path content.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScenePath {
     verbs: Arc<[PathVerb]>,
@@ -82,20 +88,17 @@ pub struct ScenePath {
 impl ScenePath {
     /// Validates and freezes authored path content.
     ///
-    /// Move-only contours are accepted but have no coverage. Open
-    /// segment-bearing contours remain structurally open: ADR 0011's synthetic
-    /// closing edge exists only during fill evaluation and is not inserted here.
-    ///
     /// # Errors
     ///
-    /// Returns [`ScenePathError`] for malformed contour ordering.
+    /// Returns [`ScenePathError`] for malformed contour ordering or derived
+    /// logical bounds that cannot be represented as a finite [`LogicalRect`].
     pub fn new(
         verbs: impl Into<Vec<PathVerb>>,
         fill_rule: PathFillRule,
     ) -> Result<Self, ScenePathError> {
         let verbs = verbs.into();
         validate_verbs(&verbs)?;
-        let logical_bounds = path_bounds(&verbs);
+        let logical_bounds = path_bounds(&verbs)?;
         Ok(Self {
             verbs: Arc::from(verbs),
             fill_rule,
@@ -115,8 +118,8 @@ impl ScenePath {
         self.fill_rule
     }
 
-    /// Returns deterministic tight segment bounds when the path has at least one
-    /// authored segment. Move-only/empty paths return `None`.
+    /// Returns deterministic tight segment bounds when at least one authored
+    /// segment exists. Empty/move-only paths return `None`.
     #[must_use]
     pub const fn logical_bounds(&self) -> Option<LogicalRect> {
         self.logical_bounds
@@ -191,18 +194,18 @@ impl Bounds {
         self.max_y = self.max_y.max(y);
     }
 
-    fn rect(self) -> Option<LogicalRect> {
+    fn rect(self) -> Result<LogicalRect, ScenePathError> {
         LogicalRect::try_new(
             self.min_x as f32,
             self.min_y as f32,
             (self.max_x - self.min_x) as f32,
             (self.max_y - self.min_y) as f32,
         )
-        .ok()
+        .map_err(|_| ScenePathError::BoundsOverflow)
     }
 }
 
-fn path_bounds(verbs: &[PathVerb]) -> Option<LogicalRect> {
+fn path_bounds(verbs: &[PathVerb]) -> Result<Option<LogicalRect>, ScenePathError> {
     let mut current = None;
     let mut first = None;
     let mut bounds: Option<Bounds> = None;
@@ -214,12 +217,16 @@ fn path_bounds(verbs: &[PathVerb]) -> Option<LogicalRect> {
                 first = Some(point);
             }
             PathVerb::LineTo(to) => {
-                let from = current?;
+                let Some(from) = current else {
+                    unreachable!("validated path segment always has a current point")
+                };
                 include_line(&mut bounds, from, to);
                 current = Some(to);
             }
             PathVerb::QuadraticTo { control, to } => {
-                let from = current?;
+                let Some(from) = current else {
+                    unreachable!("validated path segment always has a current point")
+                };
                 include_quadratic(&mut bounds, from, control, to);
                 current = Some(to);
             }
@@ -228,19 +235,26 @@ fn path_bounds(verbs: &[PathVerb]) -> Option<LogicalRect> {
                 control2,
                 to,
             } => {
-                let from = current?;
+                let Some(from) = current else {
+                    unreachable!("validated path segment always has a current point")
+                };
                 include_cubic(&mut bounds, from, control1, control2, to);
                 current = Some(to);
             }
             PathVerb::Close => {
-                let from = current?;
-                let to = first?;
+                let Some(from) = current else {
+                    unreachable!("validated close always has a current point")
+                };
+                let Some(to) = first else {
+                    unreachable!("validated close always has a contour start")
+                };
                 include_line(&mut bounds, from, to);
                 current = Some(to);
             }
         }
     }
-    bounds.and_then(Bounds::rect)
+
+    bounds.map(Bounds::rect).transpose()
 }
 
 fn ensure_bounds(bounds: &mut Option<Bounds>, point: LogicalPoint) -> &mut Bounds {
@@ -260,29 +274,40 @@ fn include_quadratic(
 ) {
     include_line(bounds, from, to);
     let bounds = ensure_bounds(bounds, from);
+
     for axis in 0..2 {
         let (p0, p1, p2) = match axis {
-            0 => (f64::from(from.x()), f64::from(control.x()), f64::from(to.x())),
-            _ => (f64::from(from.y()), f64::from(control.y()), f64::from(to.y())),
+            0 => (
+                f64::from(from.x()),
+                f64::from(control.x()),
+                f64::from(to.x()),
+            ),
+            _ => (
+                f64::from(from.y()),
+                f64::from(control.y()),
+                f64::from(to.y()),
+            ),
         };
         let denominator = p0 - 2.0 * p1 + p2;
-        if denominator != 0.0 {
-            let t = (p0 - p1) / denominator;
-            if (0.0..1.0).contains(&t) {
-                let x = quadratic(
+        if denominator == 0.0 {
+            continue;
+        }
+        let t = (p0 - p1) / denominator;
+        if (0.0..1.0).contains(&t) {
+            bounds.include(
+                quadratic(
                     f64::from(from.x()),
                     f64::from(control.x()),
                     f64::from(to.x()),
                     t,
-                );
-                let y = quadratic(
+                ),
+                quadratic(
                     f64::from(from.y()),
                     f64::from(control.y()),
                     f64::from(to.y()),
                     t,
-                );
-                bounds.include(x, y);
-            }
+                ),
+            );
         }
     }
 }
@@ -295,7 +320,7 @@ fn include_cubic(
     to: LogicalPoint,
 ) {
     include_line(bounds, from, to);
-    let mut roots = [0.0_f64; 2];
+
     for axis in 0..2 {
         let (p0, p1, p2, p3) = match axis {
             0 => (
@@ -311,27 +336,31 @@ fn include_cubic(
                 f64::from(to.y()),
             ),
         };
-        let a = -p0 + 3.0 * p1 - 3.0 * p2 + p3;
-        let b = 2.0 * (p0 - 2.0 * p1 + p2);
-        let c = p1 - p0;
-        let count = quadratic_roots(3.0 * a, b * 1.5, 3.0 * c, &mut roots);
-        for &t in roots[..count].iter() {
+        let mut roots = [0.0_f64; 2];
+        let count = quadratic_roots(
+            3.0 * (-p0 + 3.0 * p1 - 3.0 * p2 + p3),
+            6.0 * (p0 - 2.0 * p1 + p2),
+            3.0 * (p1 - p0),
+            &mut roots,
+        );
+        for &t in &roots[..count] {
             if (0.0..1.0).contains(&t) {
-                let x = cubic(
-                    f64::from(from.x()),
-                    f64::from(control1.x()),
-                    f64::from(control2.x()),
-                    f64::from(to.x()),
-                    t,
+                ensure_bounds(bounds, from).include(
+                    cubic(
+                        f64::from(from.x()),
+                        f64::from(control1.x()),
+                        f64::from(control2.x()),
+                        f64::from(to.x()),
+                        t,
+                    ),
+                    cubic(
+                        f64::from(from.y()),
+                        f64::from(control1.y()),
+                        f64::from(control2.y()),
+                        f64::from(to.y()),
+                        t,
+                    ),
                 );
-                let y = cubic(
-                    f64::from(from.y()),
-                    f64::from(control1.y()),
-                    f64::from(control2.y()),
-                    f64::from(to.y()),
-                    t,
-                );
-                ensure_bounds(bounds, from).include(x, y);
             }
         }
     }
@@ -345,6 +374,7 @@ fn quadratic_roots(a: f64, b: f64, c: f64, roots: &mut [f64; 2]) -> usize {
         roots[0] = -c / b;
         return 1;
     }
+
     let discriminant = b.mul_add(b, -4.0 * a * c);
     if discriminant < 0.0 {
         return 0;
@@ -353,6 +383,7 @@ fn quadratic_roots(a: f64, b: f64, c: f64, roots: &mut [f64; 2]) -> usize {
         roots[0] = -b / (2.0 * a);
         return 1;
     }
+
     let sqrt = discriminant.sqrt();
     let q = -0.5 * (b + sqrt.copysign(b));
     roots[0] = q / a;
@@ -385,11 +416,17 @@ mod tests {
     #[test]
     fn malformed_contours_reject_without_dependency_recovery() {
         assert_eq!(
-            ScenePath::new(vec![PathVerb::LineTo(point(1.0, 1.0))], PathFillRule::NonZero),
+            ScenePath::new(
+                vec![PathVerb::LineTo(point(1.0, 1.0))],
+                PathFillRule::NonZero,
+            ),
             Err(ScenePathError::SegmentWithoutContour)
         );
         assert_eq!(
-            ScenePath::new(vec![PathVerb::MoveTo(point(0.0, 0.0)), PathVerb::Close], PathFillRule::NonZero),
+            ScenePath::new(
+                vec![PathVerb::MoveTo(point(0.0, 0.0)), PathVerb::Close],
+                PathFillRule::NonZero,
+            ),
             Err(ScenePathError::CloseWithoutSegment)
         );
         assert_eq!(
@@ -404,6 +441,20 @@ mod tests {
             ),
             Err(ScenePathError::SegmentAfterClose)
         );
+    }
+
+    #[test]
+    fn move_only_contours_are_valid_but_have_no_coverage() {
+        let path = ScenePath::new(
+            vec![
+                PathVerb::MoveTo(point(20.0, 30.0)),
+                PathVerb::MoveTo(point(40.0, 50.0)),
+            ],
+            PathFillRule::NonZero,
+        )
+        .unwrap_or_else(|_| unreachable!("move-only path is valid"));
+        assert!(path.logical_bounds().is_none());
+        assert!(path.is_coverage_empty());
     }
 
     #[test]
@@ -424,15 +475,8 @@ mod tests {
     }
 
     #[test]
-    fn tight_bounds_include_quadratic_extrema_and_ignore_move_only_contours() {
-        let empty = ScenePath::new(
-            vec![PathVerb::MoveTo(point(20.0, 30.0))],
-            PathFillRule::NonZero,
-        )
-        .unwrap_or_else(|_| unreachable!("move-only path is valid"));
-        assert!(empty.logical_bounds().is_none());
-
-        let path = ScenePath::new(
+    fn tight_bounds_include_quadratic_and_cubic_extrema() {
+        let quadratic_path = ScenePath::new(
             vec![
                 PathVerb::MoveTo(point(0.0, 0.0)),
                 PathVerb::QuadraticTo {
@@ -443,9 +487,56 @@ mod tests {
             PathFillRule::NonZero,
         )
         .unwrap_or_else(|_| unreachable!("test path is valid"));
-        let bounds = path
+        let quadratic_bounds = quadratic_path
             .logical_bounds()
             .unwrap_or_else(|| unreachable!("segment-bearing path has bounds"));
-        assert_eq!((bounds.x(), bounds.y(), bounds.width(), bounds.height()), (0.0, 0.0, 10.0, 5.0));
+        assert_eq!(
+            (
+                quadratic_bounds.x(),
+                quadratic_bounds.y(),
+                quadratic_bounds.width(),
+                quadratic_bounds.height(),
+            ),
+            (0.0, 0.0, 10.0, 5.0)
+        );
+
+        let cubic_path = ScenePath::new(
+            vec![
+                PathVerb::MoveTo(point(0.0, 0.0)),
+                PathVerb::CubicTo {
+                    control1: point(0.0, 10.0),
+                    control2: point(10.0, 10.0),
+                    to: point(10.0, 0.0),
+                },
+            ],
+            PathFillRule::NonZero,
+        )
+        .unwrap_or_else(|_| unreachable!("test cubic path is valid"));
+        let cubic_bounds = cubic_path
+            .logical_bounds()
+            .unwrap_or_else(|| unreachable!("segment-bearing path has bounds"));
+        assert_eq!(
+            (
+                cubic_bounds.x(),
+                cubic_bounds.y(),
+                cubic_bounds.width(),
+                cubic_bounds.height(),
+            ),
+            (0.0, 0.0, 10.0, 7.5)
+        );
+    }
+
+    #[test]
+    fn unrepresentable_derived_bounds_reject_instead_of_appearing_empty() {
+        assert_eq!(
+            ScenePath::new(
+                vec![
+                    PathVerb::MoveTo(point(-f32::MAX, 0.0)),
+                    PathVerb::LineTo(point(f32::MAX, 0.0)),
+                ],
+                PathFillRule::NonZero,
+            ),
+            Err(ScenePathError::BoundsOverflow)
+        );
     }
 }
