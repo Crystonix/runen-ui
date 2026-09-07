@@ -229,6 +229,7 @@ mod input;
 mod layout;
 mod paint;
 mod path;
+mod path_containment;
 mod pointer;
 pub mod prelude;
 mod resource;
