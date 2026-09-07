@@ -36,8 +36,7 @@ impl ScenePath {
 }
 
 fn inclusive_rect_contains(rect: LogicalRect, point: LogicalPoint) -> bool {
-    (rect.x()..=rect.max_x()).contains(&point.x())
-        && (rect.y()..=rect.max_y()).contains(&point.y())
+    (rect.x()..=rect.max_x()).contains(&point.x()) && (rect.y()..=rect.max_y()).contains(&point.y())
 }
 
 fn fill_state(path: &ScenePath, point: LogicalPoint) -> FillState {
