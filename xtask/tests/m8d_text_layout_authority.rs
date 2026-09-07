@@ -20,11 +20,10 @@ const RETIRED_PRODUCTION_PATHS: [&str; 2] = [
     "crates/runenui_runtime/src/measurement.rs",
     "crates/runenui_runtime/src/surface/measure.rs",
 ];
-const RETIRED_PRODUCTION_AUTHORITIES: [&str; 7] = [
+const RETIRED_PRODUCTION_AUTHORITIES: [&str; 6] = [
     "MeasurementProvider",
     "DeterministicMeasurementProvider",
     "TextMeasurementRequest",
-    "layout_resolved_surface",
     "SurfaceMeasurer",
     "vertical linear fallback",
     "ShapedRunRaster",
