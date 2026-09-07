@@ -12,6 +12,8 @@ pub enum UnsupportedSceneSemantic {
     ShapedTextRun,
     UnknownPrimitive,
     NonEmptyClips,
+    EllipseClip,
+    PathClip,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

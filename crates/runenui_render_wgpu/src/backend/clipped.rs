@@ -8,7 +8,7 @@ pub use resource::{PublicationRenderError, ResourceRenderer, UnsupportedShapedGl
 
 use std::collections::HashMap;
 
-use runenui_core::{Color, PaintPrimitive, SceneShape};
+use runenui_core::{Color, PaintPrimitive, Radius, SceneShape};
 use runenui_runtime::{PaintPublication, RasterScale, SceneClip};
 use wgpu::util::DeviceExt;
 
@@ -16,8 +16,8 @@ use crate::{
     PublicationUpdateMode, PublicationUpdatePlan, WgpuHasDisplayHandle,
     observation::PublicationObservation,
     scene_subset::{
-        SceneValidationError, SupportedLiteralRect, publication_resource_error,
-        validate_literal_rect_item,
+        SceneValidationError, SupportedLiteralRect, UnsupportedSceneSemantic,
+        publication_resource_error, validate_literal_rect_item,
     },
 };
 
@@ -286,6 +286,8 @@ impl Renderer {
     /// exact accepted inset is cleared from the stencil mask; a collapsed inset
     /// therefore naturally becomes the complete expanded rectangle. Zero-width,
     /// zero-area, or checked derived-rectangle overflow contributes no coverage.
+    /// Ellipse and path clips are rejected by preflight until their M9A geometry
+    /// realization lands; they are never approximated as rectangular masks.
     ///
     /// # Errors
     ///
@@ -479,6 +481,19 @@ fn validate_clipped_scene_subset(
     let unsupported_resource_kind = publication_resource_error(publication);
     let mut literal_rects = Vec::with_capacity(publication.scene().items().len());
     for (item_index, item) in publication.scene().items().iter().enumerate() {
+        for clip in item.clips() {
+            let semantic = match clip.shape() {
+                SceneShape::Rect(_) | SceneShape::RoundedRect { .. } => None,
+                SceneShape::Ellipse(_) => Some(UnsupportedSceneSemantic::EllipseClip),
+                SceneShape::Path(_) => Some(UnsupportedSceneSemantic::PathClip),
+            };
+            if let Some(semantic) = semantic {
+                return Err(SceneValidationError::UnsupportedItem {
+                    item_index,
+                    semantic,
+                });
+            }
+        }
         if let Some(literal) = validate_literal_rect_item(item_index, item)? {
             literal_rects.push(LiteralRectItem {
                 literal,
@@ -498,13 +513,16 @@ struct ClipUniform {
 }
 
 impl ClipUniform {
-    fn from_scene_clip(clip: SceneClip, raster_scale: RasterScale) -> Option<Self> {
+    fn from_scene_clip(clip: &SceneClip, raster_scale: RasterScale) -> Option<Self> {
         let surface_to_clip = clip.clip_to_surface().inverse()?;
         let [m11, m12, m21, m22, tx, ty] = surface_to_clip.components();
-        let shape = clip.shape();
-        let rect = shape.outer_rect();
-        let radii = normalized_clip_radii(shape);
-        let shape_kind = if shape.radius().is_some() { 1.0 } else { 0.0 };
+        let (rect, radii, shape_kind) = match clip.shape() {
+            SceneShape::Rect(rect) => (*rect, [0.0; 4], 0.0),
+            SceneShape::RoundedRect { rect, radius } => {
+                (*rect, normalized_clip_radii(*rect, *radius), 1.0)
+            }
+            SceneShape::Ellipse(_) | SceneShape::Path(_) => return None,
+        };
         Some(Self {
             values: [
                 m11,
@@ -542,16 +560,11 @@ fn prepare_clip_uniforms(
 ) -> Option<Vec<ClipUniform>> {
     clips
         .iter()
-        .copied()
         .map(|clip| ClipUniform::from_scene_clip(clip, raster_scale))
         .collect()
 }
 
-fn normalized_clip_radii(shape: SceneShape) -> [f32; 4] {
-    let Some(radius) = shape.radius() else {
-        return [0.0; 4];
-    };
-    let rect = shape.outer_rect();
+fn normalized_clip_radii(rect: runenui_core::LogicalRect, radius: Radius) -> [f32; 4] {
     let radii = [
         f64::from(radius.top_left().get()),
         f64::from(radius.top_right().get()),
@@ -937,8 +950,8 @@ mod tests {
     use runenui_core::{
         Color, ContributionClip, Element, LogicalLength, LogicalPoint, LogicalRect, LogicalSize,
         LogicalTransform, NoHostProtocol, PaintContribution, PaintContributionContext,
-        PaintContributionItem, Radius, SceneShape, StyleEnvironment, UiApp, Widget,
-        WidgetInvalidation, WidgetMeasure, WidgetUpdateContext,
+        PaintContributionItem, PathFillRule, PathVerb, Radius, ScenePath, SceneShape,
+        StyleEnvironment, UiApp, Widget, WidgetInvalidation, WidgetMeasure, WidgetUpdateContext,
     };
     use runenui_runtime::{
         AppRuntime, LayoutConstraints, PaintPublication, RasterScale, SceneClip,
@@ -946,7 +959,10 @@ mod tests {
     };
 
     use super::{ClipUniform, Renderer, prepare_clip_uniforms, validate_clipped_scene_subset};
-    use crate::{BackendSelection, RendererInitError, RendererOptions};
+    use crate::{
+        BackendSelection, RendererInitError, RendererOptions,
+        scene_subset::{SceneValidationError, UnsupportedSceneSemantic},
+    };
 
     const SURFACE_WIDTH: u16 = 64;
     const SURFACE_HEIGHT: u16 = 48;
@@ -1011,6 +1027,10 @@ mod tests {
             .unwrap_or_else(|_| unreachable!("fixture rectangle is valid"))
     }
 
+    fn point(x: f32, y: f32) -> LogicalPoint {
+        LogicalPoint::new(x, y).unwrap_or_else(|_| unreachable!("fixture point is finite"))
+    }
+
     fn publication(items: Vec<PaintContributionItem>, scale: f32) -> PaintPublication {
         let mut runtime = AppRuntime::<FixtureApp>::mount(items);
         let style_environment = StyleEnvironment::default();
@@ -1046,11 +1066,15 @@ mod tests {
     }
 
     fn find_clip_proof_probes(
-        first_clip: SceneClip,
-        second_clip: SceneClip,
+        first_clip: &SceneClip,
+        second_clip: &SceneClip,
         inverse_second: LogicalTransform,
         scale: f32,
     ) -> Result<ClipProofProbes, Box<dyn Error>> {
+        let rounded_outer_rect = match second_clip.shape() {
+            SceneShape::RoundedRect { rect, .. } => *rect,
+            _ => unreachable!("fixture second clip is a rounded rectangle"),
+        };
         let mut probes = ClipProofProbes::default();
         for y in 0_u16..63 {
             for x in 0_u16..84 {
@@ -1075,9 +1099,9 @@ mod tests {
                     (false, false) => {}
                 }
                 if first
-                    && inverse_second.transform_point(point).is_some_and(|local| {
-                        second_clip.shape().outer_rect().contains(local) && !second
-                    })
+                    && inverse_second
+                        .transform_point(point)
+                        .is_some_and(|local| rounded_outer_rect.contains(local) && !second)
                 {
                     probes.rounded_corner_cut.get_or_insert(probe);
                 }
@@ -1106,7 +1130,7 @@ mod tests {
         let clip = ContributionClip::new(rounded, transform);
         let mut many = PaintContributionItem::fill_rect(rect(0.0, 0.0, 64.0, 48.0), Color::WHITE);
         for _ in 0..300 {
-            many = many.with_clip(clip);
+            many = many.with_clip(clip.clone());
         }
         let many_publication = publication(vec![many], 1.25);
         let fills = validate_clipped_scene_subset(&many_publication)?;
@@ -1163,7 +1187,7 @@ mod tests {
             ],
             2.0,
         );
-        let scene_clip = publication.scene().items()[0].clips()[0];
+        let scene_clip = &publication.scene().items()[0].clips()[0];
         let uniform = ClipUniform::from_scene_clip(scene_clip, publication.raster_scale())
             .unwrap_or_else(|| unreachable!("fixture clip is invertible"));
         let inverse = scene_clip
@@ -1197,6 +1221,43 @@ mod tests {
                 semantic: crate::scene_subset::UnsupportedSceneSemantic::NonEmptyClips,
             })
         ));
+    }
+
+    #[test]
+    fn unsupported_ellipse_and_path_clips_reject_during_preflight() -> Result<(), Box<dyn Error>> {
+        let path = ScenePath::new(
+            vec![
+                PathVerb::MoveTo(point(2.0, 2.0)),
+                PathVerb::LineTo(point(10.0, 2.0)),
+                PathVerb::LineTo(point(6.0, 10.0)),
+                PathVerb::Close,
+            ],
+            PathFillRule::NonZero,
+        )?;
+        for (shape, expected) in [
+            (
+                SceneShape::ellipse(rect(2.0, 2.0, 8.0, 8.0)),
+                UnsupportedSceneSemantic::EllipseClip,
+            ),
+            (SceneShape::path(path), UnsupportedSceneSemantic::PathClip),
+        ] {
+            let publication = publication(
+                vec![PaintContributionItem::fill_rect(
+                    rect(0.0, 0.0, 20.0, 20.0),
+                    Color::WHITE,
+                )
+                .with_clip(ContributionClip::identity(shape))],
+                1.0,
+            );
+            assert!(matches!(
+                validate_clipped_scene_subset(&publication),
+                Err(SceneValidationError::UnsupportedItem {
+                    item_index: 0,
+                    semantic,
+                }) if semantic == expected
+            ));
+        }
+        Ok(())
     }
 
     #[test]
@@ -1242,7 +1303,7 @@ mod tests {
             crate::OffscreenExtent::new(84, 63)?
         );
         let scale = publication.raster_scale().get();
-        let probes = find_clip_proof_probes(clips[0], clips[1], inverse_second, scale)?;
+        let probes = find_clip_proof_probes(&clips[0], &clips[1], inverse_second, scale)?;
 
         let inside = probes
             .inside_both

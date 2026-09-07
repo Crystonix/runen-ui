@@ -503,7 +503,7 @@ mod tests {
         let clip = ContributionClip::identity(SceneShape::rect(rect));
         let item = default_item
             .with_transform(transform)
-            .with_clip(clip)
+            .with_clip(clip.clone())
             .with_opacity(opacity)
             .with_layer(SceneLayer::new(-2));
         assert_eq!(item.local_transform(), transform);
