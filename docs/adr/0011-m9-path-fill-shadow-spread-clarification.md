@@ -98,18 +98,12 @@ their explicit boundary contracts differ.
 
 ### Shadow spread is Euclidean morphological spread
 
-Let `C` be the exact pre-shadow **source-alpha support** after the shadow owner's
-children/items have been clipped and source-over composed, but before shadow spread,
-offset, and blur. A logical point belongs to `C` exactly when the resulting composed
-source alpha at that point is non-zero. Fully transparent source contributes no
-shadow support merely because its primitive geometry has area.
-
-For resource-backed content, the immutable payload bound to the complete accepted
-`ResourceRef` supplies its source alpha during realization. That does not transfer
-shadow semantics to the renderer: the resource binding, source-over order, clip
-semantics, and non-zero-alpha support rule are neutral accepted facts. Runtime may use
-conservative neutral primitive/resource bounds for framework effect bounds without
-inspecting resource pixels.
+Let `C` be the exact pre-shadow **composed logical coverage set** already owned by ADR
+0010: item clips constrain items, group children source-over compose, and group effects
+derive from that composed child coverage before group clips/opacity are applied in the
+frozen ADR 0010 order. ADR 0011 does not redefine how primitive, brush, image, text,
+resource, opacity, or sampling semantics contribute to that inherited coverage. It
+only freezes the previously missing spread operation over `C`.
 
 For finite signed spread `s`:
 
@@ -137,22 +131,23 @@ logical bounds from raster pixels.
 ### Framework shadow bounds are deterministic and conservative
 
 Framework effect/damage bounds describe accepted logical coverage and need not be the
-smallest mathematically possible AABB. They may conservatively bound source-alpha
-support from neutral primitive/resource geometry; they do not need payload-alpha
-inspection to remain authoritative.
+smallest mathematically possible AABB. They remain derived from neutral scene facts;
+this amendment does not add payload-pixel inspection or a renderer-owned bounds path.
 
-Given conservative pre-shadow support bounds:
+Given conservative pre-shadow coverage bounds:
 
 1. positive spread expands each side by `s`;
 2. zero spread preserves those bounds;
 3. negative spread may conservatively retain the pre-shadow bounds when a tighter
-   erosion bound is unavailable, but an actually empty eroded support set remains
-   empty;
+   erosion bound is unavailable;
 4. apply the finite logical shadow offset; and
 5. expand each axis by `3 * sigma` for blur support.
 
-A renderer may keep tighter private realization bounds. It must never expose or rely
-on a framework bound smaller than actual accepted logical shadow coverage.
+The actual spread-adjusted coverage still obeys the exact disk erosion/dilation rule,
+including complete-erosion emptiness. A conservative framework AABB may be larger than
+that coverage. A renderer may keep tighter private realization bounds, but it must
+never expose or rely on a framework bound smaller than actual accepted logical shadow
+coverage.
 
 ## Conformance impact
 
@@ -162,8 +157,8 @@ This amendment changes no M9 row count or status. It sharpens existing obligatio
   ellipse degeneracy, and tolerance-independent logical containment;
 - `M9VIS-03` proves explicit-close seam/join behavior versus open-contour endpoint
   cap behavior; and
-- `M9VIS-08` proves source-alpha-support ownership, Euclidean disk
-  dilation/erosion, rotation invariance, conservative logical effect bounds,
+- `M9VIS-08` proves Euclidean disk dilation/erosion over inherited composed child
+  coverage, rotation invariance, conservative logical effect bounds,
   complete-erosion emptiness, and finite `3 * sigma` support.
 
 All 25 M9 rows remain `blocked` until their implementation and proof are accepted
@@ -173,12 +168,12 @@ through the normal serial delivery/reconciliation process.
 
 - `runenui_core` cannot make Lyon's tolerance-based hit-test the public path
   containment oracle.
-- Renderer tessellation and shadow-mask kernels remain disposable realization, not
+- Renderer tessellation and shadow kernels remain disposable realization, not
   geometry authority.
 - Path fill and stroke may share authored segments while deliberately differing at
   an unclosed contour's final-to-first edge.
-- Fully transparent composed source does not cast a shadow solely because its neutral
-  primitive bounds are non-empty.
+- ADR 0010 remains the owner of what constitutes composed child coverage; ADR 0011
+  only defines how signed spread transforms that coverage.
 - Shadow spread has one rotation-invariant meaning across paths, ellipses, images,
   text-derived/group coverage, raster scales, and renderer devices.
 
@@ -201,11 +196,12 @@ Rejected because square dilation/erosion is orientation-dependent. Ordinary spre
 must not change meaning merely because equivalent source coverage is rotated relative
 to logical axes.
 
-### Use primitive AABBs as shadow source coverage
+### Redefine composed coverage in this amendment
 
-Rejected because transparent or clipped-away source could then cast a shadow. AABBs
-are permitted only as conservative framework effect-bound inputs, not as the source
-alpha-support definition.
+Rejected because ADR 0010 already owns group/item composition and coverage order.
+Adding a new source-alpha, image-sampling, brush, or resource-support rule here would
+expand #183 beyond the missing spread operation and risk creating a second coverage
+authority.
 
 ### Let raster morphology define spread
 
@@ -215,4 +211,5 @@ framework geometry authority.
 ## Non-goals
 
 This amendment adds no production Rust, dependency, renderer, workflow, motion,
-filter family, blend mode, path morphing, new M9 row, or new implementation slice.
+filter family, blend mode, path morphing, new M9 row, new resource/image sampling
+semantics, or new implementation slice.
