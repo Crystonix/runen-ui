@@ -1,4 +1,4 @@
-//! Tolerance-independent logical fill containment for structural RunenUI paths.
+//! Tolerance-independent logical fill containment for structural `RunenUI` paths.
 
 use core::cmp::Ordering;
 
@@ -21,105 +21,10 @@ impl ScenePath {
             return false;
         }
 
-        let mut state = FillState::default();
-        let mut contour_start = None;
-        let mut current = None;
-        let mut has_segment = false;
-        let mut explicitly_closed = false;
-
-        for verb in self.verbs() {
-            match *verb {
-                PathVerb::MoveTo(to) => {
-                    finish_open_contour(
-                        &mut state,
-                        current,
-                        contour_start,
-                        has_segment,
-                        explicitly_closed,
-                        point,
-                    );
-                    if state.boundary {
-                        return true;
-                    }
-                    contour_start = Some(to);
-                    current = Some(to);
-                    has_segment = false;
-                    explicitly_closed = false;
-                }
-                PathVerb::LineTo(to) => {
-                    let Some(from) = current else {
-                        unreachable!("validated path segment always has a current point")
-                    };
-                    state.include(Segment::Line { from, to }, point);
-                    if state.boundary {
-                        return true;
-                    }
-                    current = Some(to);
-                    has_segment = true;
-                }
-                PathVerb::QuadraticTo { control, to } => {
-                    let Some(from) = current else {
-                        unreachable!("validated path segment always has a current point")
-                    };
-                    state.include(Segment::Quadratic { from, control, to }, point);
-                    if state.boundary {
-                        return true;
-                    }
-                    current = Some(to);
-                    has_segment = true;
-                }
-                PathVerb::CubicTo {
-                    control1,
-                    control2,
-                    to,
-                } => {
-                    let Some(from) = current else {
-                        unreachable!("validated path segment always has a current point")
-                    };
-                    state.include(
-                        Segment::Cubic {
-                            from,
-                            control1,
-                            control2,
-                            to,
-                        },
-                        point,
-                    );
-                    if state.boundary {
-                        return true;
-                    }
-                    current = Some(to);
-                    has_segment = true;
-                }
-                PathVerb::Close => {
-                    let Some(from) = current else {
-                        unreachable!("validated close always has a current point")
-                    };
-                    let Some(to) = contour_start else {
-                        unreachable!("validated close always has a contour start")
-                    };
-                    state.include(Segment::Line { from, to }, point);
-                    if state.boundary {
-                        return true;
-                    }
-                    current = Some(to);
-                    explicitly_closed = true;
-                }
-            }
-        }
-
-        finish_open_contour(
-            &mut state,
-            current,
-            contour_start,
-            has_segment,
-            explicitly_closed,
-            point,
-        );
+        let state = fill_state(self, point);
         if state.boundary {
             return true;
         }
-
         match self.fill_rule() {
             PathFillRule::NonZero => state.winding != 0,
             PathFillRule::EvenOdd => state.parity,
@@ -128,10 +33,108 @@ impl ScenePath {
 }
 
 fn inclusive_rect_contains(rect: LogicalRect, point: LogicalPoint) -> bool {
-    point.x() >= rect.x()
-        && point.x() <= rect.max_x()
-        && point.y() >= rect.y()
-        && point.y() <= rect.max_y()
+    let x_inside = point.x() >= rect.x() && point.x() <= rect.max_x();
+    let y_inside = point.y() >= rect.y() && point.y() <= rect.max_y();
+    x_inside && y_inside
+}
+
+fn fill_state(path: &ScenePath, point: LogicalPoint) -> FillState {
+    let mut state = FillState::default();
+    let mut contour_start = None;
+    let mut current = None;
+    let mut has_segment = false;
+    let mut explicitly_closed = false;
+
+    for verb in path.verbs() {
+        match *verb {
+            PathVerb::MoveTo(to) => {
+                finish_open_contour(
+                    &mut state,
+                    current,
+                    contour_start,
+                    has_segment,
+                    explicitly_closed,
+                    point,
+                );
+                if state.boundary {
+                    return state;
+                }
+                contour_start = Some(to);
+                current = Some(to);
+                has_segment = false;
+                explicitly_closed = false;
+            }
+            PathVerb::LineTo(to) => {
+                let Some(from) = current else {
+                    unreachable!("validated path segment always has a current point")
+                };
+                state.include(Segment::Line { from, to }, point);
+                if state.boundary {
+                    return state;
+                }
+                current = Some(to);
+                has_segment = true;
+            }
+            PathVerb::QuadraticTo { control, to } => {
+                let Some(from) = current else {
+                    unreachable!("validated path segment always has a current point")
+                };
+                state.include(Segment::Quadratic { from, control, to }, point);
+                if state.boundary {
+                    return state;
+                }
+                current = Some(to);
+                has_segment = true;
+            }
+            PathVerb::CubicTo {
+                control1,
+                control2,
+                to,
+            } => {
+                let Some(from) = current else {
+                    unreachable!("validated path segment always has a current point")
+                };
+                state.include(
+                    Segment::Cubic {
+                        from,
+                        control1,
+                        control2,
+                        to,
+                    },
+                    point,
+                );
+                if state.boundary {
+                    return state;
+                }
+                current = Some(to);
+                has_segment = true;
+            }
+            PathVerb::Close => {
+                let Some(from) = current else {
+                    unreachable!("validated close always has a current point")
+                };
+                let Some(to) = contour_start else {
+                    unreachable!("validated close always has a contour start")
+                };
+                state.include(Segment::Line { from, to }, point);
+                if state.boundary {
+                    return state;
+                }
+                current = Some(to);
+                explicitly_closed = true;
+            }
+        }
+    }
+
+    finish_open_contour(
+        &mut state,
+        current,
+        contour_start,
+        has_segment,
+        explicitly_closed,
+        point,
+    );
+    state
 }
 
 fn finish_open_contour(
@@ -405,7 +408,7 @@ fn root_bracket(
     let increasing = low_value < high_value;
 
     for _ in 0..96 {
-        let middle = (low + high) * 0.5;
+        let middle = f64::midpoint(low, high);
         if middle.total_cmp(&low) == Ordering::Equal || middle.total_cmp(&high) == Ordering::Equal {
             break;
         }
