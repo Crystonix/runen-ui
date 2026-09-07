@@ -2,7 +2,7 @@
 
 `runenui_text` is RunenUI's renderer-neutral production text boundary.
 
-Its accepted M8B responsibility is to own explicit font-source/fallback configuration, Parley-backed shaping and line breaking, logical text metrics/artifacts, reusable private text-layout state, and immutable logical shaped-resource bindings behind RunenUI-owned public contracts.
+Its accepted M8 responsibility is to own explicit font-source/fallback configuration, Parley-backed shaping and line breaking, logical text metrics/artifacts, reusable private text-layout state, and immutable logical shaped-resource bindings behind RunenUI-owned public contracts.
 
 It must not own mounted/runtime/publication state, general layout topology or scheduling, renderer/GPU/SDF-MSDF atlas state, native host integration, semantics/accessibility, application state, or editable-text behavior.
 
@@ -31,12 +31,14 @@ This makes generic typography deterministic in `BundledOnly` mode once its inten
 
 The returned immutable `TextArtifact` is the single source for paragraph measurement and exact line/run/cluster/glyph/font shaped-resource facts. Paint-only foreground state is not part of the text request or shaped identity.
 
-## Accepted M8B/M8C integration
+## Accepted M8 integration
 
-Runtime owns the live `TextSystem` orchestration and topology-aligned reusable `TextLayoutState`. M8C's private Taffy layout requests are lowered through runtime into the smaller renderer-neutral `TextConstraints` seam. Intrinsic/compute-size text requests remain transient; the exact text state produced for Taffy's final `PerformLayout` request is the state retained for publication. The resulting immutable artifact supplies exact text measurement and the same shaped run origins and immutable `ResourceRef -> ShapedTextResource` bindings later used for paint. Publication retains explicit shaped-resource leases so renderer retry remains valid after runtime destruction or cache/device loss.
+Runtime owns the live `TextSystem` orchestration and topology-aligned reusable `TextLayoutState`. Private Taffy layout requests are lowered through runtime into the smaller renderer-neutral `TextConstraints` seam. Intrinsic/compute-size text requests remain transient; the exact text state produced for Taffy's final `PerformLayout` request is the state retained for publication. The resulting immutable artifact supplies exact text measurement and the same shaped run origins and immutable `ResourceRef -> ShapedTextResource` bindings later used for paint. Publication retains explicit shaped-resource leases so renderer retry remains valid after runtime destruction or cache/device loss.
+
+The accepted M8D closure proves that this is one correlated production path: available-space changes drive deterministic reflow through the bounded runtime/Taffy/text transaction; the artifact/resources used for measurement are the exact resources projected into paint without paint-time reshape, rebreak, or remint; final semantic text and bounds remain aligned with the same runtime-owned geometry; deterministic public tests use controlled bundled fonts; and retained resources survive renderer cache loss and raster-scale/quality re-realization through the real wgpu path.
 
 `runenui_render_wgpu` consumes those exact already-shaped font/glyph bindings and owns only disposable per-glyph SDF/MSDF generation, quality classes, atlas pages, GPU textures, reconstruction, and cache lifetime. It does not shape, line-break, discover fonts, or alter logical identity. Supported outline glyphs have no hidden alpha-raster fallback; unsupported intrinsic COLR/SVG/bitmap breadth diagnoses explicitly.
 
-M8C owns the accepted production general-layout and exact available-space feedback path into these same text requests. M8D owns integrated responsive/text-heavy closure across runtime text/layout, semantics, paint, and the real renderer. Production editing, selection, and clipboard behavior remain M10 work; intrinsic color-glyph rendering remains separate future breadth rather than changing the accepted outline-text authority.
+Production editing, selection, and clipboard behavior remain M10 work; intrinsic color-glyph rendering remains separate future breadth rather than changing the accepted outline-text authority.
 
 See ADR 0009 and `docs/conformance/m8-conformance-matrix.md` for the durable architecture and permanent proof obligations.

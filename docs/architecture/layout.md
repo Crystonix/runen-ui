@@ -2,7 +2,7 @@
 
 > **Category: Current architecture**
 
-This document describes the layout and measurement behavior in the current framework foundation. Runtime owns layout orchestration and final geometry; private Taffy low-level algorithms provide Block/Flex/Grid computation, and ADR 0009 owns the production layout/text boundary established across M8B and M8C.
+This document describes the layout and measurement behavior in the current framework foundation. Runtime owns layout orchestration and final geometry; private Taffy low-level algorithms provide Block/Flex/Grid computation, and ADR 0009 owns the production layout/text boundary established across M8B–M8D.
 
 ## Current ownership
 
@@ -17,15 +17,16 @@ The current implementation provides:
 - normalized independent minimum/maximum runtime constraints with finite and unbounded maxima;
 - validated finite logical geometry and saturating derived arithmetic at finite boundaries;
 - state-aware widget intrinsic measurement through bounded RunenUI-owned `WidgetMeasure` capabilities and geometry-neutral child-bearing participation;
-- production text measurement through the runtime-owned `TextSystem`, lowering runtime horizontal availability into renderer-neutral `TextConstraints` and consuming the resulting immutable `TextArtifact` size;
+- production text measurement through the runtime-owned `TextSystem`, lowering exact Taffy known/available-space facts into renderer-neutral `TextConstraints` and consuming the resulting immutable `TextArtifact` size;
 - topology-aligned retained `TextLayoutState` so compatible text requests can reuse shaping or re-line-break through `runenui_text` without becoming mounted authority;
-- one logical text artifact/result as the source of both measured text metrics and the exact shaped resources later projected into paint;
-- persistent selective layout/text state compatible with staged publication;
+- exact final-layout retention so the logical text artifact/resource facts used for measurement are the same facts later projected into paint, with no paint-time reshape, rebreak, or remint;
+- persistent selective layout/text state compatible with staged publication and inspectable measurement/reflow/final-retention correlation;
 - Taffy-backed Block/Flex/Grid sizing, nested normalized layout modes, gaps, padding, positioning, baseline propagation, and deterministic overflow/unsupported diagnostics;
 - one-cell Grid lowering for RunenUI Overlay semantics, including inspectable layout/content/scrollable extents;
-- aligned mounted-order layout products used by hit testing, semantic bounds, directional focus geometry, and paint placement.
+- aligned mounted-order layout products used by hit testing, semantic bounds, directional focus geometry, and paint placement;
+- deterministic bundled-font public integration coverage and real-wgpu responsive/multiscript proof over the same production path, including retained-resource retry and raster-scale re-realization.
 
-There is no production scalar-count/fixed-width text estimator or caller-owned text measurement provider. Non-text widget measurement remains expressed through the current bounded RunenUI widget capability vocabulary; broader responsive/text-heavy closure remains an M8D concern.
+There is no production scalar-count/fixed-width text estimator, caller-owned text measurement provider, independent framework measure-until-stable loop, retained `TaffyTree`, or renderer-owned shaping/layout path. Non-text widget measurement remains expressed through the bounded RunenUI widget capability vocabulary.
 
 `LAYOUT` invalidation clears or recomputes the required derived layout/text state and schedules dependent geometry work. Compatible authored style/layout changes are read from current mounted state; retained topology does not own stale layout/style authoring values. Paint-only text foreground remains outside shaped identity, while metric typography participates in text compatibility.
 
@@ -47,7 +48,7 @@ For text measurement, finite and semantic minimum/max-content requests are lower
 
 ## Current limitations
 
-The current profile intentionally remains bounded: it does not provide virtualization, native scrolling mechanics, browser inline formatting breadth, or the integrated responsive/text-heavy closure owned by M8D. Taffy state is transaction-local and disposable; final logical geometry remains a single runtime-owned publication product.
+The current profile intentionally remains bounded: it does not provide virtualization, native scrolling mechanics, or browser inline-formatting breadth. Those later capabilities build on the accepted M8 logical geometry, overflow/extents, and text artifacts rather than introducing a second layout/text authority. Taffy state is transaction-local and disposable; final logical geometry remains a single runtime-owned publication product.
 
 ## Extraction rule
 
