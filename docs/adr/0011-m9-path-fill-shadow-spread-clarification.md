@@ -98,8 +98,18 @@ their explicit boundary contracts differ.
 
 ### Shadow spread is Euclidean morphological spread
 
-Let `C` be the exact pre-shadow composed logical coverage set before shadow spread,
-offset, and blur.
+Let `C` be the exact pre-shadow **source-alpha support** after the shadow owner's
+children/items have been clipped and source-over composed, but before shadow spread,
+offset, and blur. A logical point belongs to `C` exactly when the resulting composed
+source alpha at that point is non-zero. Fully transparent source contributes no
+shadow support merely because its primitive geometry has area.
+
+For resource-backed content, the immutable payload bound to the complete accepted
+`ResourceRef` supplies its source alpha during realization. That does not transfer
+shadow semantics to the renderer: the resource binding, source-over order, clip
+semantics, and non-zero-alpha support rule are neutral accepted facts. Runtime may use
+conservative neutral primitive/resource bounds for framework effect bounds without
+inspecting resource pixels.
 
 For finite signed spread `s`:
 
@@ -127,14 +137,16 @@ logical bounds from raster pixels.
 ### Framework shadow bounds are deterministic and conservative
 
 Framework effect/damage bounds describe accepted logical coverage and need not be the
-smallest mathematically possible AABB.
+smallest mathematically possible AABB. They may conservatively bound source-alpha
+support from neutral primitive/resource geometry; they do not need payload-alpha
+inspection to remain authoritative.
 
-Given the exact pre-shadow coverage bounds:
+Given conservative pre-shadow support bounds:
 
 1. positive spread expands each side by `s`;
 2. zero spread preserves those bounds;
 3. negative spread may conservatively retain the pre-shadow bounds when a tighter
-   erosion bound is unavailable, but an actually empty eroded coverage set remains
+   erosion bound is unavailable, but an actually empty eroded support set remains
    empty;
 4. apply the finite logical shadow offset; and
 5. expand each axis by `3 * sigma` for blur support.
@@ -150,9 +162,9 @@ This amendment changes no M9 row count or status. It sharpens existing obligatio
   ellipse degeneracy, and tolerance-independent logical containment;
 - `M9VIS-03` proves explicit-close seam/join behavior versus open-contour endpoint
   cap behavior; and
-- `M9VIS-08` proves Euclidean disk dilation/erosion, rotation invariance,
-  conservative logical effect bounds, complete-erosion emptiness, and finite
-  `3 * sigma` support.
+- `M9VIS-08` proves source-alpha-support ownership, Euclidean disk
+  dilation/erosion, rotation invariance, conservative logical effect bounds,
+  complete-erosion emptiness, and finite `3 * sigma` support.
 
 All 25 M9 rows remain `blocked` until their implementation and proof are accepted
 through the normal serial delivery/reconciliation process.
@@ -165,6 +177,8 @@ through the normal serial delivery/reconciliation process.
   geometry authority.
 - Path fill and stroke may share authored segments while deliberately differing at
   an unclosed contour's final-to-first edge.
+- Fully transparent composed source does not cast a shadow solely because its neutral
+  primitive bounds are non-empty.
 - Shadow spread has one rotation-invariant meaning across paths, ellipses, images,
   text-derived/group coverage, raster scales, and renderer devices.
 
@@ -186,6 +200,12 @@ it cannot alter accepted logical results.
 Rejected because square dilation/erosion is orientation-dependent. Ordinary spread
 must not change meaning merely because equivalent source coverage is rotated relative
 to logical axes.
+
+### Use primitive AABBs as shadow source coverage
+
+Rejected because transparent or clipped-away source could then cast a shadow. AABBs
+are permitted only as conservative framework effect-bound inputs, not as the source
+alpha-support definition.
 
 ### Let raster morphology define spread
 
