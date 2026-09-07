@@ -21,7 +21,7 @@ The audit fails closed for material repository-contract violations including:
 - workspace members/package names/dependency direction drifting from the documented workspace contract;
 - forbidden or missing source authorities covered by the source-ownership audit;
 - repository metadata/license/publication-policy drift;
-- issue-template or canonical read-only CI workflow drift;
+- issue-template or admitted read-only workflow inventory/contract drift;
 - retained context-export profile inventory/default/bounded-profile drift;
 - active historical repository/default-branch identities outside explicit history/report exemptions;
 - private archive references outside the migration-history owner;
@@ -32,7 +32,7 @@ The documentation audit derives volatility policy from artifact class and reposi
 - ordinary root, crate, example, test, policy, status, roadmap, architecture, tooling, context-guide, pull-request-template, issue-template, and retained context-profile material is **strict current authority** and must not hard-code live issue/PR/run URLs, full commit SHAs, current heads/branches/blockers, or pickup state;
 - accepted ADR/design/conformance material is **frozen contract authority**: immutable acceptance provenance may remain where it explains the contract, but mutable current-head/branch/blocker/pickup markers are forbidden;
 - changelog, history, and report material is **provenance authority** and may preserve point-in-time revision evidence;
-- `.github/workflows/` is exempt from documentation-volatility rules because the canonical workflow requires an immutable reusable-workflow revision and is independently enforced by the exact workflow-contract audit.
+- `.github/workflows/` is exempt from documentation-volatility rules because admitted workflows require immutable Action/reusable-workflow revisions and are independently enforced by the workflow-contract audit.
 
 The retained context exporter has a separate structural guard: exactly `offline-review`, `implementation-review`, and `full-audit` profiles are permitted; `offline-review` must remain the default; every retained profile is volatility-audited as strict-current configuration; and the two bounded profiles must exclude `Cargo.lock`, `docs/history/**`, `docs/reports/**`, and `legacy/**`. `full-audit` remains the intentionally comprehensive profile. The Python profile tests remain tool-specific behavioral checks; they are not made a prerequisite for Rust validation merely because the optional exporter exists.
 
@@ -58,7 +58,12 @@ File size, public-item count, responsibility vocabulary, and similar concentrati
 
 ## CI contract
 
-The active workflow inventory remains intentionally small. The repository caller must be read-only, trigger on pull requests and pushes to `main`, and invoke the accepted immutable reusable `cargo validate` workflow without product-specific steps, secrets, or source mutation.
+The active workflow inventory remains intentionally small and fail-closed.
+
+- `.github/workflows/ci.yml` remains the ordinary repository baseline: read-only, triggered on pull requests and pushes to `main`, and exactly invokes the accepted immutable reusable `cargo validate` workflow without product-specific steps, secrets, or source mutation.
+- When the retained real-renderer visual proof exists, `.github/workflows/visual-conformance.yml` is additionally required as the one specialized visual-evidence boundary. It is read-only, proves the exact checked-out revision, provisions only the deterministic native renderer environment, runs repository-owned real-wgpu proof tests, requires the fixed human-review evidence files, verifies tracked-state hygiene, and uploads only that fixed runner-temporary evidence directory with an immutable Action revision and bounded retention.
+
+The specialized workflow supplements `cargo validate`; it does not redefine the repository baseline, move visual generation into CI authority, permit arbitrary extra workflows, mutate source, or create a second runtime/renderer correctness model. The executable audit validates the exact admitted workflow bodies and rejects inventory drift.
 
 ## JSON schema
 

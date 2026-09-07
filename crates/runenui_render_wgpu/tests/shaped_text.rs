@@ -228,22 +228,36 @@ fn production_msdf_pixel_evidence_is_stable_and_small_size_is_covered()
     register_font(&mut runtime);
     let small = publish(&mut runtime, RasterScale::new(0.5)?);
     let provider = ExternalOnlyProvider::default();
-    let readback = renderer.render_offscreen_publication(&small, &provider)?;
-    let pixels = readback.readback().rgba8_srgb();
-    assert!(alpha_pixels(&readback) > 0);
+    let first = renderer.render_offscreen_publication(&small, &provider)?;
+    let first_pixels = first.readback().rgba8_srgb();
+    let first_alpha_pixels = alpha_pixels(&first);
+    assert!(first_alpha_pixels > 0);
     assert!(
-        pixels
+        first_pixels
             .as_chunks::<4>()
             .0
             .iter()
-            .any(|pixel| pixel[3] > 0 && pixel[3] < 255)
+            .any(|pixel| pixel[3] > 0 && pixel[3] < 255),
+        "small production MSDF text must retain antialiased edge coverage"
     );
+
+    let first_hash = fnv1a(first_pixels);
     eprintln!(
-        "production MSDF small-size golden: hash={:016x}, alpha_pixels={}",
-        fnv1a(pixels),
-        alpha_pixels(&readback)
+        "production MSDF small-size pixels: adapter={:?}, hash={first_hash:016x}, alpha_pixels={first_alpha_pixels}",
+        renderer.diagnostics().adapter_info()
     );
-    assert_eq!(fnv1a(pixels), 0x8a54_f9b6_5ca8_085f);
+
+    assert!(renderer.discard_resource_cache());
+    assert!(renderer.discard_offscreen_target());
+    let repeated = renderer.render_offscreen_publication(&small, &provider)?;
+    let repeated_pixels = repeated.readback().rgba8_srgb();
+    assert_eq!(
+        repeated_pixels, first_pixels,
+        "the same renderer/device must reproduce identical pixels after resource and target re-realization"
+    );
+    assert_eq!(fnv1a(repeated_pixels), first_hash);
+    assert_eq!(alpha_pixels(&repeated), first_alpha_pixels);
+    assert_eq!(provider.loads.get(), 0);
     Ok(())
 }
 

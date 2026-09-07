@@ -254,7 +254,7 @@ pub use runenui_core::{
 };
 pub use runenui_text::{
     FontRegistrationError, FontSourcePolicy, FontSourceSnapshot, GenericFamilyMappingError,
-    TextLayoutError,
+    TextConstraints, TextLayoutDecision, TextLayoutError,
 };
 pub use runtime::{
     HostRequestCancelError, HostResponseError, PublishSurfaceError, ReconciliationDiagnostic,
@@ -279,6 +279,7 @@ pub use style_debug::{SurfaceStyleNode, SurfaceStyleReport, render_debug_surface
 pub use surface::{
     LayoutOverflow, RasterScale, RasterScaleError, SurfaceBuildContext, SurfaceFrame,
     SurfaceLayoutNode, SurfaceLayoutReport, SurfaceNode, SurfacePhase, SurfacePhaseReport,
+    SurfaceTextMeasurementRecord,
 };
 pub use surface_command::{
     SubmitSurfaceCommandError, SubmitSurfaceCommandErrorKind, UnacceptedSurfaceCommand,

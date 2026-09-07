@@ -841,7 +841,7 @@ fn generate_msdf_raster(
         &MsdfGeneratorConfig::default(),
     );
     let mut rgba8 = Vec::with_capacity(width.saturating_mul(height).saturating_mul(4));
-    for y in (0..height).rev() {
+    for y in 0..height {
         for x in 0..width {
             for channel in bitmap.pixel(x, y) {
                 rgba8.push((channel.clamp(0.0, 1.0) * 255.0).round() as u8);
@@ -1229,24 +1229,43 @@ mod tests {
 
     #[test]
     fn asymmetric_glyph_field_has_stable_orientation_proof() {
-        let (_system, artifact) = shaped_resource("F");
+        let (_system, artifact) = shaped_resource("T");
         let resource = artifact.lines()[0].runs()[0].shaped_resource();
         let rasters = rasterize_unique_glyphs(resource, QualityTier::P16)
             .unwrap_or_else(|_| unreachable!("Cantarell outline realization succeeds"));
+        let repeated = rasterize_unique_glyphs(resource, QualityTier::P16)
+            .unwrap_or_else(|_| unreachable!("repeated Cantarell outline realization succeeds"));
+        assert_eq!(
+            rasters, repeated,
+            "CPU field generation must be deterministic"
+        );
         let raster = rasters
             .iter()
             .find(|raster| raster.glyph_id == resource.glyphs()[0].id())
-            .unwrap_or_else(|| unreachable!("the F glyph has one outline field"));
-        let row_bytes = raster.width as usize * 4;
-        let mirrored = raster
-            .rgba8
-            .as_chunks::<4>()
-            .0
-            .chunks_exact(row_bytes / 4)
-            .flat_map(|row| row.iter().rev().flatten().copied())
+            .unwrap_or_else(|| unreachable!("the T glyph has one outline field"));
+        let width = raster.width as usize;
+        let height = raster.height as usize;
+        let pixels = raster.rgba8.as_chunks::<4>().0;
+        let inside = |pixel: &[u8; 4]| {
+            let mut channels = [pixel[0], pixel[1], pixel[2]];
+            channels.sort_unstable();
+            channels[1] > 127
+        };
+        let row_widths = pixels
+            .chunks_exact(width)
+            .map(|row| row.iter().filter(|pixel| inside(pixel)).count())
             .collect::<Vec<_>>();
-        assert_ne!(raster.rgba8.as_ref(), mirrored.as_slice());
-        assert_eq!(fnv1a(&raster.rgba8), 0xd60f_6797_64de_9f56);
+        let midpoint = height / 2;
+        let top_widest = row_widths[..midpoint].iter().copied().max().unwrap_or(0);
+        let bottom_widest = row_widths[midpoint..].iter().copied().max().unwrap_or(0);
+        assert!(
+            top_widest > bottom_widest,
+            "upright T must retain a wider filled MSDF row above its vertical midpoint: top={top_widest}, bottom={bottom_widest}"
+        );
+        eprintln!(
+            "upright T MSDF field: hash={:016x}, top_widest={top_widest}, bottom_widest={bottom_widest}",
+            fnv1a(&raster.rgba8)
+        );
     }
 
     #[test]

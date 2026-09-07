@@ -1,4 +1,4 @@
-//! Native Counter application showcase over the accepted M7 public edges.
+//! Native Counter application showcase over the accepted production UI edges.
 
 #[path = "../app.rs"]
 mod app;
@@ -23,8 +23,8 @@ use runenui_render_wgpu::{
     ResourceProviderError, ResourceProviderErrorKind, ResourceRequest,
 };
 use runenui_runtime::{
-    AppRuntime, LogicalSize, PumpBudget, RasterScale, RedrawRequest, SubmitKeyboardErrorKind,
-    SurfaceBuildContext, SurfacePublication,
+    AppRuntime, FontSourcePolicy, LogicalSize, PumpBudget, RasterScale, RedrawRequest,
+    RuntimeConfig, SubmitKeyboardErrorKind, SurfaceBuildContext, SurfacePublication,
 };
 use runenui_winit::{
     accessibility::{AccessibilityEvent, SemanticAdapter},
@@ -56,9 +56,9 @@ impl From<accesskit_winit::Event> for HostEvent {
     }
 }
 
-struct NoResources;
+struct NoExternalResources;
 
-impl ResourceProvider for NoResources {
+impl ResourceProvider for NoExternalResources {
     fn load(
         &self,
         _resource: &runenui_core::ResourceRef,
@@ -66,7 +66,7 @@ impl ResourceProvider for NoResources {
     ) -> Result<ResourcePayload, ResourceProviderError> {
         Err(ResourceProviderError::new(
             ResourceProviderErrorKind::Missing,
-            "Counter publishes literal fill paint only",
+            "Counter provides no external image resources",
         ))
     }
 }
@@ -247,7 +247,11 @@ struct CounterHost {
 
 impl CounterHost {
     fn new(proxy: EventLoopProxy<HostEvent>) -> Self {
-        let runtime = AppRuntime::<CounterApp>::mount(Counter::new());
+        let runtime = AppRuntime::<CounterApp>::mount_with_config(
+            Counter::new(),
+            RuntimeConfig::default()
+                .with_text_font_source_policy(FontSourcePolicy::SystemAndBundled),
+        );
         let wake_proxy = proxy.clone();
         runtime.set_wake_transport(move || {
             let _ = wake_proxy.send_event(HostEvent::Wake);
@@ -754,7 +758,7 @@ impl CounterHost {
             .and_then(|renderer| {
                 renderer.render_surface_publication(
                     pending.publication.paint_publication(),
-                    &NoResources,
+                    &NoExternalResources,
                     || window.pre_present_notify(),
                 )
             });

@@ -5,6 +5,7 @@ use runenui_core::{
 use crate::app::{Counter, CounterAction};
 
 const SCREEN_BACKGROUND: Color = Color::rgb(24, 28, 36);
+const SCREEN_FOREGROUND: Color = Color::rgb(238, 240, 246);
 const CONTROL_BACKGROUND: Color = Color::rgb(54, 64, 82);
 const RESET_BACKGROUND: Color = Color::rgb(92, 58, 58);
 const WIN_BACKGROUND: Color = Color::rgb(38, 82, 58);
@@ -53,6 +54,7 @@ impl CounterScreen {
         ])
         .key("counter.screen")
         .background(SCREEN_BACKGROUND)
+        .foreground(SCREEN_FOREGROUND)
         .padding(padding(16))
         .gap(8_u16)
         .into_element()
@@ -80,6 +82,7 @@ impl WinScreen {
         ])
         .key("win.screen")
         .background(WIN_BACKGROUND)
+        .foreground(SCREEN_FOREGROUND)
         .padding(padding(16))
         .gap(8_u16)
         .into_element()
