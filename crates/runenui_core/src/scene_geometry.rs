@@ -281,7 +281,7 @@ impl SceneShape {
 
     /// Creates one structural path scene shape without changing path identity.
     #[must_use]
-    pub fn path(path: ScenePath) -> Self {
+    pub const fn path(path: ScenePath) -> Self {
         Self::Path(path)
     }
 
