@@ -389,7 +389,7 @@ fn include_cubic(
     }
 }
 
-pub(super) fn quadratic_roots(a: f64, b: f64, c: f64, roots: &mut [f64; 2]) -> usize {
+pub fn quadratic_roots(a: f64, b: f64, c: f64, roots: &mut [f64; 2]) -> usize {
     if a == 0.0 {
         if b == 0.0 {
             return 0;
@@ -414,20 +414,20 @@ pub(super) fn quadratic_roots(a: f64, b: f64, c: f64, roots: &mut [f64; 2]) -> u
     2
 }
 
-pub(super) fn quadratic(p0: f64, p1: f64, p2: f64, t: f64) -> f64 {
+pub fn quadratic(p0: f64, p1: f64, p2: f64, t: f64) -> f64 {
     let a = (-2.0_f64).mul_add(p1, p0) + p2;
     let b = 2.0 * (p1 - p0);
     a.mul_add(t, b).mul_add(t, p0)
 }
 
-pub(super) fn cubic_coefficients(p0: f64, p1: f64, p2: f64, p3: f64) -> [f64; 4] {
+pub fn cubic_coefficients(p0: f64, p1: f64, p2: f64, p3: f64) -> [f64; 4] {
     let a = (-3.0_f64).mul_add(p2, 3.0_f64.mul_add(p1, -p0)) + p3;
     let b = 3.0 * ((-2.0_f64).mul_add(p1, p0) + p2);
     let c = 3.0 * (p1 - p0);
     [a, b, c, p0]
 }
 
-pub(super) fn cubic(p0: f64, p1: f64, p2: f64, p3: f64, parameter: f64) -> f64 {
+pub fn cubic(p0: f64, p1: f64, p2: f64, p3: f64, parameter: f64) -> f64 {
     let [cubic_term, quadratic_term, linear_term, constant_term] =
         cubic_coefficients(p0, p1, p2, p3);
     cubic_term
