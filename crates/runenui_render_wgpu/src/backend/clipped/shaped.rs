@@ -1233,7 +1233,10 @@ mod tests {
             .unwrap_or_else(|_| unreachable!("Cantarell outline realization succeeds"));
         let repeated = rasterize_unique_glyphs(resource, QualityTier::P16)
             .unwrap_or_else(|_| unreachable!("repeated Cantarell outline realization succeeds"));
-        assert_eq!(rasters, repeated, "CPU field generation must be deterministic");
+        assert_eq!(
+            rasters, repeated,
+            "CPU field generation must be deterministic"
+        );
         let raster = rasters
             .iter()
             .find(|raster| raster.glyph_id == resource.glyphs()[0].id())
