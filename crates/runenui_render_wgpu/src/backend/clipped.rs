@@ -1242,11 +1242,10 @@ mod tests {
             (SceneShape::path(path), UnsupportedSceneSemantic::PathClip),
         ] {
             let publication = publication(
-                vec![PaintContributionItem::fill_rect(
-                    rect(0.0, 0.0, 20.0, 20.0),
-                    Color::WHITE,
-                )
-                .with_clip(ContributionClip::identity(shape))],
+                vec![
+                    PaintContributionItem::fill_rect(rect(0.0, 0.0, 20.0, 20.0), Color::WHITE)
+                        .with_clip(ContributionClip::identity(shape)),
+                ],
                 1.0,
             );
             assert!(matches!(
