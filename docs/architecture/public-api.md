@@ -115,6 +115,10 @@ RunenUI-owned layout values and exact mounted topology are interpreted only by r
 
 RunenUI-owned text requests are resolved by `runenui_text`; runtime owns when that computation participates in mounted measurement/publication. One immutable logical artifact supplies both paragraph measurement and the exact shaped resource facts later painted. During production layout, intrinsic/compute-size text results are transient while the exact `TextLayoutState` produced for Taffy's final `PerformLayout` request is retained for publication. Paint does not independently reshape, line-break, discover fonts, or mint alternate shaped identity. Foreground remains paint-only when glyph geometry is unchanged.
 
+### One integrated M8 production path
+
+The accepted M8 closure preserves those separate ownership seams while proving their correlation. Exact Taffy known/available-space facts drive deterministic text requests inside the bounded layout transaction; the exact retained artifact/resource facts used for measurement are projected into paint; final semantic text and bounds use the same runtime-owned geometry; deterministic public tests use bundled fonts and controlled inputs; and the real wgpu renderer consumes the retained shaped resources through SDF/MSDF realization, including retry after renderer-cache loss and raster-scale/quality re-realization. None of those observations creates a second layout loop, text system, semantic tree, software expected renderer, or renderer-owned shaping authority.
+
 ### Staged publication
 
 Surface publication follows a staged transaction with admission, read-only/staged planning, candidate-dependent final preflight, and commit. Recoverable refusal or terminal failure must not expose a partial new RunenUI-owned publication state.
@@ -128,13 +132,13 @@ For runtime-shaped text, retained paint publication lifetime also preserves the 
 The current public surface is pre-1.0 and may change incompatibly when accepted architecture requires a clean cutover. Important missing production capabilities include:
 
 - broader production host/application ergonomics beyond the accepted proof-level native and external-host paths;
-- integrated responsive/text-heavy closure across layout, text, semantics and the real renderer (M8D), plus later virtualization and native scrolling mechanics;
+- virtualization and native scrolling mechanics beyond the accepted logical overflow/content/scroll extents;
 - production text editing, selection, clipboard, and related behavior (M10);
-- supported rendering for intrinsic COLR/SVG/bitmap glyph formats; current M8B behavior diagnoses that breadth explicitly;
+- supported rendering for intrinsic COLR/SVG/bitmap glyph formats; current behavior diagnoses that breadth explicitly;
 - multi-window lifecycle and supported platform-profile breadth;
 - broader visual style-property/composition/animation breadth beyond the accepted M8 foundation;
 - a complete standard control library.
 
-M7 is accepted complete at proof maturity through the real wgpu renderer/resource edge, standalone winit host/native-input/presentation path, reusable winit/AccessKit adapter, native Counter showcase, and winit-free downstream external-host proof over the same public contracts. M8A is accepted current behavior at partial styling maturity. M8B is accepted current behavior at partial text maturity through the renderer-neutral production text boundary, exact shared measurement/paint artifacts, retained shaped-resource lifetime, and renderer-owned SDF/MSDF realization. M8C is accepted current behavior at partial layout maturity through runtime-owned production Block/Flex/Grid layout, bounded custom measurement, inspectable overflow/extents, and exact final-layout text feedback. M8D integrated production closure remains the next durable M8 slice. Current maturity is summarized in [status](../status.md). Durable future sequencing belongs in the [roadmap](../roadmap.md). Permanent observable/proof requirements live under [conformance](../conformance/README.md).
+M7 is accepted complete at proof maturity through the real wgpu renderer/resource edge, standalone winit host/native-input/presentation path, reusable winit/AccessKit adapter, native Counter showcase, and winit-free downstream external-host proof over the same public contracts. M8 is accepted complete at its production-foundation scope through deterministic production style resolution, renderer-neutral international text, runtime-owned Block/Flex/Grid layout with exact text feedback, retained measurement-to-paint resource identity, semantic content/bounds correlation, deterministic bundled-font public proof, and real-wgpu SDF/MSDF responsive/multiscript integration. Current maturity is summarized in [status](../status.md). Durable future sequencing belongs in the [roadmap](../roadmap.md). Permanent observable/proof requirements live under [conformance](../conformance/README.md).
 
 Do not infer support from a target ADR, design document, type name, or roadmap entry alone. Code/tests establish current behavior; source/Rustdoc establishes the exact public Rust surface.
