@@ -16,6 +16,19 @@ const PRODUCTION_SOURCE_ROOTS: [&str; 4] = [
     "crates/runenui_runtime/src",
     "crates/runenui_render_wgpu/src",
 ];
+const RETIRED_PRODUCTION_PATHS: [&str; 2] = [
+    "crates/runenui_runtime/src/measurement.rs",
+    "crates/runenui_runtime/src/surface/measure.rs",
+];
+const RETIRED_PRODUCTION_AUTHORITIES: [&str; 7] = [
+    "MeasurementProvider",
+    "DeterministicMeasurementProvider",
+    "TextMeasurementRequest",
+    "layout_resolved_surface",
+    "SurfaceMeasurer",
+    "vertical linear fallback",
+    "ShapedRunRaster",
+];
 
 #[test]
 fn production_text_measurement_and_paint_share_one_retained_artifact_path() -> Result<(), String> {
@@ -101,6 +114,26 @@ fn runtime_layout_has_one_bounded_taffy_entrypoint_without_parallel_stabilizatio
 }
 
 #[test]
+fn proof_era_production_authorities_remain_retired() -> Result<(), String> {
+    let root = workspace_root()?;
+
+    for relative in RETIRED_PRODUCTION_PATHS {
+        if root.join(relative).exists() {
+            return Err(format!(
+                "M8D retired production authority path must not reappear: {relative}"
+            ));
+        }
+    }
+
+    for relative in PRODUCTION_SOURCE_ROOTS {
+        for forbidden in RETIRED_PRODUCTION_AUTHORITIES {
+            assert_rust_tree_omits(&root.join(relative), forbidden)?;
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn proof_era_renderer_and_showcase_authority_is_not_current() -> Result<(), String> {
     let root = workspace_root()?;
     for relative in CURRENT_RENDERER_AUTHORITY {
@@ -118,10 +151,6 @@ fn proof_era_renderer_and_showcase_authority_is_not_current() -> Result<(), Stri
                 ));
             }
         }
-    }
-
-    for relative in PRODUCTION_SOURCE_ROOTS {
-        assert_rust_tree_omits(&root.join(relative), "ShapedRunRaster")?;
     }
     Ok(())
 }
