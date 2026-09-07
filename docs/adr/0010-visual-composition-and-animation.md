@@ -17,487 +17,441 @@
 
 ## Context
 
-M8 closed the production style/layout/international-text foundation. The accepted
-runtime already owns canonical interaction state, deterministic logical time,
-style resolution, layout/text feedback, final logical geometry, staged paint/hit/
-semantic publication, wake/redraw, and mounted lifetime. The accepted renderer
-already consumes immutable renderer-neutral paint publications and owns only
-disposable GPU/resource realization.
+M8 closed the production style/layout/international-text foundation. Runtime already
+owns canonical interaction state, deterministic logical time, style resolution,
+layout/text feedback, final logical geometry, staged paint/hit/semantic publication,
+wake/redraw, and mounted lifetime. The accepted renderer consumes immutable neutral
+paint publications and owns only disposable realization.
 
-M9 must add normal production visual breadth and motion without turning any of those
-accepted facts into duplicated authorities. In particular:
+M9 must add ordinary production visual breadth and motion without creating parallel
+state, geometry, scheduling, scene, semantic, or renderer authority. At the accepted
+base:
 
-- the current paint primitive set is intentionally limited to rectangle fill/stroke,
-  exact-mapped images, and shaped text;
-- `SceneShape` covers only rectangles and rounded rectangles;
-- item-local transforms and item opacity are self-contained paint facts, not a
-  node-wide presentation-geometry authority;
-- images expose opaque logical `ResourceRef` identity but no renderer-neutral
-  intrinsic-size metadata, so contain/cover/nine-slice cannot truthfully be left to
-  a renderer-specific guess;
-- reduced motion is already an explicit preference fact, but M8 has no animation
-  property family;
-- the runtime already provides `MonotonicClock`, deterministic `ManualClock`,
-  canonical wake/redraw, bounded pumping, and mounted-generation cleanup.
+- paint primitives are limited to rectangle fill/stroke, exact-mapped image, and
+  shaped text;
+- `SceneShape` is rectangle/rounded-rectangle only;
+- item-local transform/opacity are paint facts, not node-wide presentation geometry;
+- opaque image `ResourceRef` carries no neutral intrinsic-size metadata, so
+  contain/cover/nine-slice cannot be renderer policy;
+- reduced motion is an explicit preference fact but no animation family exists;
+- `MonotonicClock`, deterministic `ManualClock`, canonical wake/redraw, bounded pump,
+  trace, and mounted-generation cleanup already exist.
 
 ## Relationship to accepted authority
 
 This ADR preserves:
 
 - M3 mounted identity/lifecycle/state/invalidation and one retained runtime tree;
-- M4 one deterministic logical-time/work/wake/redraw authority and canonical trace;
+- M4 logical time, scheduling, wake/redraw, one canonical FIFO, and trace;
 - M5 semantic identity/publication/action and deterministic public testing;
-- M6 immutable renderer-neutral paint/hit scenes, exact transform/clip semantics,
+- M6 immutable renderer-neutral paint/hit publication, exact transform/clip rules,
   `ResourceRef`, retained publication, and staged atomicity;
-- M7 the concrete wgpu renderer/host/resource edges and disposable device caches;
-- M8 canonical style precedence/preferences, property-effect classification,
-  runtime-owned Taffy layout/final geometry, and the exact shaped-text resource path.
+- M7 concrete renderer/host/resource edges and disposable device caches;
+- M8 style precedence/preferences, property-effect classification, runtime-owned
+  Taffy layout/final geometry, and exact shaped-text resources.
 
-M10 remains the owner of editing/selection/clipboard and broader interaction services;
-M11 owns standard controls; M12 owns virtualization; M13 owns broad platform/device
-profiles. M9 does not acquire those responsibilities indirectly through animation.
+M10 remains editing/interaction-services authority; M11 controls; M12 virtualization;
+M13 broad platform/device profiles.
 
 ## Decision
 
-### One renderer-neutral visual and motion flow
+### One renderer-neutral visual/motion flow
 
 ```text
 authored visual/style/motion intent
     + canonical interaction/application state
     + explicit preferences
-    -> runtime-resolved target visual facts
-    -> runtime-owned live transition/timeline state
+    -> runtime-resolved target facts
+    -> runtime-owned transition/timeline state
     + one monotonic-time sample
     -> sampled presentation/style facts
-    -> exact dependent layout/text/paint/hit/focus/semantic work
+    -> exact layout/text/paint/hit/focus/semantic dependencies
     -> one staged immutable publication
     -> disposable renderer realization
 ```
 
 No renderer, dependency, or widget callback owns a competing scene timeline, clock,
-scheduler, mounted tree, semantic geometry path, or property cache.
+scheduler, mounted tree, property cache, or semantic geometry path.
 
-### RunenUI owns the public visual vocabulary
+### Public visual vocabulary remains RunenUI-owned
 
-Public M9 vocabulary remains `runenui_core`-owned and backend-neutral. Dependency
-path/paint/color/scene types are not public protocol types.
+`runenui_core` owns the public host/renderer-neutral contract. Dependency path,
+paint, color, scene, animation, and backend types do not enter public protocols.
 
-The initial production shape vocabulary is:
+Initial shapes are:
 
 - rectangle;
-- rounded rectangle with the existing normalized-corner rule;
+- rounded rectangle using the existing corner normalization rule;
 - ellipse;
-- immutable validated path made from move, line, quadratic, cubic, and close verbs.
+- immutable validated path with move, line, quadratic, cubic, and close verbs.
 
-Paths use finite logical `f32` coordinates, explicit contour boundaries, and an
-explicit non-zero/even-odd fill rule. Empty/degenerate contours remain representable
-where their meaning is deterministic, but malformed/non-finite verbs are rejected.
-Logical path bounds and hit behavior are framework facts; renderer tessellation is
-not an authority for either.
+Paths use finite logical `f32` coordinates, explicit contours, and explicit non-zero
+or even-odd fill rule. Malformed/non-finite paths reject. Degenerate contours are
+retained only where their coverage is deterministic. Logical bounds and hit behavior
+are framework facts, never renderer-tessellation output.
 
-The production stroke contract explicitly owns width, cap, join, and miter limit.
-Stroke width is finite and non-negative. Zero width means no coverage, never a
-backend hairline. Miter-limit and degenerate-join behavior are deterministic and
-validated before renderer realization.
+Strokes own finite non-negative width, cap, join, and miter limit. Width zero means no
+coverage, never a backend hairline. Invalid join/miter values reject before renderer
+realization.
 
-### Brushes and color/composition semantics
+### Brushes and color semantics
 
-A RunenUI-owned brush is initially one of:
+Initial brushes are solid `Color`, linear gradient, and radial gradient. Conic
+gradients and arbitrary shader brushes are deferred.
 
-- solid `Color`;
-- linear gradient;
-- radial gradient.
+Gradient geometry is logical. Stops have finite offsets in `[0, 1]`, stable
+nondecreasing order, at least two entries, and may share offsets for hard stops.
 
-Conic gradients and arbitrary shader brushes are not part of the initial M9
-contract. Gradient geometry is expressed in logical coordinates. Stops are finite
-normalized offsets in `[0, 1]`, stored in stable authored order after validation;
-nondecreasing offsets are required and equal offsets are permitted for hard stops.
-At least two stops are required.
+Existing `Color` remains straight-alpha sRGB8 public storage. Gradient evaluation and
+continuous color animation use premultiplied linear-sRGB interpolation with
+deterministic conversion/clamping at neutral publication boundaries. Source-over is
+the ordinary composition rule unless an accepted composition group specifies another
+bounded neutral mode. Backend blend/shader enums are not widget semantics.
 
-The accepted `Color` remains straight-alpha sRGB8 public storage. Gradient and color
-animation interpolation is defined in premultiplied linear-sRGB space and converted
-back to the public representation with deterministic clamping/rounding. Rendering
-uses source-over unless an explicitly accepted composition group says otherwise.
-Backend blend/shader enums never become widget semantics.
-
-### Images carry enough neutral geometry to make fit deterministic
+### Image geometry is resolved before the renderer
 
 `ResourceRef` remains the complete opaque logical image identity. M9 adds a neutral
-image descriptor that pairs an image `ResourceRef` with immutable intrinsic pixel
-size metadata supplied by the logical resource owner. Intrinsic size is descriptive
-metadata, not a second resource identity and not renderer cache state.
+image descriptor pairing an image `ResourceRef` with immutable intrinsic pixel size
+metadata supplied by the logical resource owner. Metadata is descriptive and never a
+second identity/cache key.
 
 Image paint owns:
 
-- normalized source rectangle/crop;
+- normalized source crop;
 - logical destination rectangle;
-- fit mode: fill, contain, cover, none, or scale-down;
+- fit: fill, contain, cover, none, or scale-down;
 - normalized two-axis alignment;
 - optional nine-slice source insets plus explicit logical destination edge widths.
 
-Contain/cover/scale-down geometry is resolved from the descriptor before renderer
-realization. Invalid or unavailable intrinsic metadata diagnoses explicitly; the
-renderer must not silently choose another fit. Source crop, fit, alignment, nine-
-slice, layout extent, raster scale, atlas placement, and device state do not remint
-`ResourceRef`.
+Fit is resolved before renderer realization. Missing/invalid intrinsic metadata
+diagnoses; the renderer never guesses another fit. Crop, fit, alignment, nine-slice,
+layout, raster scale, atlas placement, and device state do not remint `ResourceRef`.
 
-Nine-slice source insets are normalized to immutable source-image dimensions and
-must not overlap after normalization. Destination edge widths are logical lengths;
-when the destination is smaller than opposing edges, the edges are proportionally
-normalized rather than creating negative center geometry.
+Nine-slice source insets cannot overlap after normalization. If destination size is
+smaller than opposing logical edge widths, opposing edges are proportionally scaled
+so center extent is never negative.
 
-### Composition groups are immutable publication structure, not a retained UI tree
+### Composition groups are immutable publication structure
 
-Correct group opacity and future bounded offscreen effects cannot be represented as
-independent per-item alpha when children overlap. M9 therefore permits an immutable
-snapshot-local composition-group table in `PaintScene`.
+Group opacity cannot be replaced by per-child opacity when children overlap. M9
+therefore permits an immutable snapshot-local group table in `PaintScene`.
 
-A group may carry:
+A group may carry parent group reference, conjunctive clips, validated group opacity,
+one bounded neutral composition mode, and accepted bounded effects. Paint items
+reference their containing group.
 
-- parent snapshot-local group reference;
-- conjunctive clip(s);
-- validated group opacity;
-- a bounded composition mode required by accepted M9 behavior;
-- ordinary renderer-neutral effects accepted by this ADR.
+Group IDs are snapshot-local structure/order only. They have no mounted identity,
+lifecycle, reconciliation key, semantic identity, widget state, or cross-publication
+authority. Runtime derives the table while staging a publication. Renderer offscreen
+targets are disposable realization state.
 
-Paint items reference their containing group. Group identifiers are snapshot-local
-ordering/structure values only: they have no mounted identity, lifecycle, widget
-state, semantic identity, reconciliation key, or cross-publication authority.
-Runtime derives the group structure while staging one publication; the renderer may
-materialize temporary offscreen targets but cannot retain a second framework scene.
+Item opacity remains item-local. Group opacity applies to the composed group result.
 
-Per-item opacity remains valid for truly item-local alpha. Group opacity is applied
-after rendering group contents into the group result; it must not be rewritten as
-per-child opacity when that changes compositing.
+### Ordinary shadows are bounded neutral effects
 
-### Ordinary shadows are bounded renderer-neutral effects
+Drop shadows own finite logical offset, non-negative Gaussian sigma, finite signed
+spread, and straight-alpha `Color`. Negative spread may contract source coverage;
+positive spread expands it. Collapsed spread produces empty shadow coverage rather
+than negative geometry.
 
-M9 accepts ordinary drop shadows expressed by finite logical offset, non-negative
-Gaussian sigma, non-negative spread, and straight-alpha `Color`. Shadow coverage
-expands logical effect/damage bounds but does not enlarge layout, hit, focus, or
-semantic bounds by default.
+Shadows expand paint/effect/damage bounds only. They do not alter layout, physical
+hit, directional focus, or semantic bounds by default. Renderer blur kernels,
+offscreen targets, sampling, and quality are disposable implementation details.
 
-The renderer owns blur kernels, temporary targets, sampling strategy, and quality
-tradeoffs that preserve the neutral shadow contract. An arbitrary filter graph,
-custom shader callback, backend blend program, or public offscreen texture handle is
-not an M9 extension mechanism.
+Arbitrary filter graphs, custom shader callbacks, backend blend programs, and public
+offscreen handles are not M9 extension mechanisms.
 
-### The renderer-neutral extension boundary is deliberate refusal, not `Any`
+### Extension means explicit neutral contract, not `Any`
 
-M9 does not add a generic custom-shader/custom-render-node escape hatch. The
-extension boundary is the accepted non-exhaustive RunenUI scene/resource vocabulary:
-future richer effects require a new explicit neutral primitive/effect/resource
-contract with deterministic bounds, semantics, fallback/diagnostic behavior, and
-renderer capability requirements.
+M9 adds no generic custom render node/shader escape hatch. Future richer effects must
+add an explicit non-exhaustive neutral primitive/effect/resource contract with
+validated bounds, diagnostics/fallback behavior, and renderer capability semantics.
+WGSL, wgpu handles, dependency scene nodes, or backend filter enums never become
+public framework semantics.
 
-This preserves multiple-renderer viability and prevents renderer handles, WGSL,
-dependency scene nodes, or backend blend/filter enums from becoming framework API.
-
-### Presentation geometry is a runtime-wide correlated fact
+### Presentation geometry is one correlated runtime fact
 
 M9 introduces node-level presentation geometry distinct from widget-authored
 item-local paint transforms. A style/motion presentation transform is resolved and
-sampled once by runtime and then composed consistently into:
+sampled once and composed consistently into:
 
 - paint geometry;
-- hit geometry;
+- physical hit geometry;
 - directional-focus geometry;
 - semantic bounds;
-- any clip geometry whose accepted coordinate space is presentation-relative.
+- presentation-relative clips.
 
-A visually translated/scaled/rotated control therefore cannot remain interactive or
-accessibility-addressed at stale layout coordinates.
+Visible controls therefore cannot move while interaction/accessibility remains at old
+layout coordinates.
 
-The initial presentation transform is a validated decomposed 2D value with logical
-translation, finite scale, finite rotation, and a normalized transform origin within
-the final layout box. Runtime derives the final affine `LogicalTransform`. Component
-interpolation is deterministic; matrix-entry interpolation is not the public motion
-contract. Singular sampled transforms have empty physical hit coverage according to
-the inherited M6 rule and diagnose where required.
+The initial public transform is decomposed 2D presentation data: logical translation,
+finite scale, finite rotation, and normalized origin in the final layout box. Runtime
+derives the affine `LogicalTransform`; public animation interpolates components, not
+matrix entries.
 
-Presentation transforms do not rewrite layout geometry. Layout-affecting motion uses
-actual layout properties and the accepted layout/text authority instead.
+Hit testing uses the exact transformed shape. Directional focus and semantic bounds
+use deterministic axis-aligned bounds of the transformed authoritative geometry.
+Singular transforms have empty physical hit coverage under inherited M6 rules and do
+not fall back to untransformed geometry.
 
-### Adopt Lyon privately for path algorithms/tessellation; do not expose it
+Presentation transforms never rewrite layout. Layout-affecting motion animates actual
+layout properties and invokes the accepted layout/text authority.
 
-M9 accepts the Lyon `1.0.x` family as the preferred subordinate path algorithm and
-GPU-mesh tessellation family, subject to exact-patch revalidation in the first
-implementation PR that adds it.
+### Lyon is the preferred private path/tessellation family
 
-Intended use is private:
+M9 accepts Lyon `1.0.x` as subordinate algorithms/tessellation, subject to exact patch
+revalidation in the first dependency-changing implementation PR.
 
-- `lyon_path` / `lyon_algorithms` may support exact path bounds, flattening, and hit
-  algorithms behind RunenUI-owned values where that reduces correctness risk;
-- `lyon_tessellation` may be used by `runenui_render_wgpu` for disposable fill/stroke
-  tessellation.
+Intended private use:
 
-Lyon never owns public path identity, mounted state, scene ordering, hit target
-identity, style, animation, resource identity, or renderer lifetime. Tessellated
-vertices are disposable renderer data.
+- `lyon_path` / `lyon_algorithms` may support bounds, flattening, and hit algorithms
+  behind RunenUI-owned values;
+- `lyon_tessellation` may provide disposable fill/stroke meshes in
+  `runenui_render_wgpu`.
 
-At A0 research time the latest published Lyon meta-crate family is `1.0.19`
-(MIT OR Apache-2.0); upstream `main` is actively maintained and already carries
-newer 1.0.x subcrate development. Published manifests do not declare a formal
-`rust-version`, so the implementation PR must explicitly prove the chosen exact
-patch against RunenUI Rust `1.93.0`, inspect transitive dependencies/features, and
-pin/reject it if that proof fails.
+Lyon never owns public path identity, mounted state, scene order, hit targets, style,
+animation, resources, or renderer lifetime.
 
-### Kurbo, Peniko, and Vello are not adopted as M9 authorities
+A0 research found the latest published Lyon meta-crate family at `1.0.19`
+(MIT OR Apache-2.0) while upstream `main` remains active and already carries newer
+1.0.x subcrate development. Published manifests do not declare a formal
+`rust-version`; the first adoption PR must prove the exact chosen patch with RunenUI
+Rust `1.93.0`, inspect features/transitives/licenses, and stop if that proof fails.
 
-A0 reviewed the current Linebender stack:
+### Kurbo, Peniko, and Vello are not M9 authorities
 
-- Kurbo `0.13.1` is mature, MIT OR Apache-2.0, MSRV 1.85, and useful 2D curve
-  infrastructure. Its canonical geometry is `f64` and it does not remove the need
-  for a renderer tessellator. M9 does not add a second private curve model alongside
-  Lyon without a concrete missing-algorithm need.
-- Peniko `0.6.1` is MIT OR Apache-2.0 with MSRV 1.85 and provides solid/gradient/
-  image/blend styling types. Those types overlap exactly with RunenUI's required
-  public color/resource/style/composition semantics, so adopting Peniko as public
-  vocabulary or a parallel scene model is rejected.
-- Vello `0.10.0` is an alpha GPU compute renderer, MIT OR Apache-2.0, MSRV 1.92,
-  currently tied to wgpu `29.0.x`, and exposes its own `Scene`/`Renderer` model.
-  RunenUI's accepted renderer is already on wgpu `30.0.x`; adopting Vello wholesale
-  would add a second renderer/scene authority and a second wgpu major. It is rejected
-  for M9. Future evidence may reconsider a narrowly isolated algorithm if it no
-  longer transfers authority.
+Current research:
 
-### Easing/interpolation semantics are small enough to remain RunenUI-owned
+- Kurbo `0.13.1`: mature 2D curves, MIT OR Apache-2.0, MSRV 1.85. Its canonical
+  geometry is `f64` and it does not replace tessellation. Do not add a second curve
+  model beside Lyon without a concrete missing-algorithm need.
+- Peniko `0.6.1`: MIT OR Apache-2.0, MSRV 1.85. Its brush/image/blend vocabulary
+  overlaps RunenUI's required public color/resource/style/composition authority, so
+  public Peniko types and a parallel Peniko scene model are rejected.
+- Vello `0.10.0`: alpha GPU renderer, MIT OR Apache-2.0, MSRV 1.92, currently on
+  wgpu `29.0.x` with its own `Scene`/`Renderer`. RunenUI is on wgpu `30.0.x`; wholesale
+  Vello adoption would add a second renderer/scene authority and second wgpu major.
+  It is rejected for M9.
 
-A0 reviewed generic animation/easing crates including `keyframe`, `interpolation`,
-`enterpolation`, and Penner-easing ports. `keyframe`'s current release is old and
-owns animation-sequence semantics; generic interpolation crates do not encode
-RunenUI property compatibility, invalidation, reduced-motion, mounted lifetime, or
-publication atomicity.
+A future narrow algorithm may be reconsidered only if it does not transfer authority.
 
-M9 therefore builds the bounded easing/interpolation layer directly. Initial easing
-is linear plus validated cubic Bézier timing curves and named convenience values
-defined in terms of those curves. Timing input and output are normalized `[0, 1]`
-scalars; endpoint values are exact. Easing does not own clock/timeline state.
+### Easing/interpolation remains RunenUI-owned
 
-### Style transitions and explicit timelines are separate descriptions
+A0 reviewed `keyframe`, `interpolation`, `enterpolation`, and Penner-easing crates.
+`keyframe` owns animation-sequence semantics and its current release is old; generic
+interpolation crates do not encode RunenUI property compatibility, invalidation,
+reduced motion, mounted lifetime, or publication atomicity.
 
-M9 supports two motion sources:
+The bounded M9 easing layer is built directly: linear plus validated cubic-Bezier
+timing curves and named conveniences defined in terms of them. Input/output are
+normalized `[0, 1]` scalars with exact endpoints. Easing has no clock/timeline state.
 
-1. **Style transitions** animate a resolved property target change caused by normal
-   style resolution, including canonical hover/focus/active/disabled changes. A
-   transition starts from the currently sampled presented value, not necessarily the
-   previous target, so interruption/reversal is continuous.
-2. **Explicit timelines** are host-neutral declarative keyframe descriptions for
-   bounded visual/property motion not caused by a style-target change. They carry a
-   stable authored animation ID, duration, delay, ordered normalized keyframes,
-   easing per segment or timeline, and repeat policy (`once`, finite count, or
-   forever). Reversed motion is authored by reversed keyframes rather than a second
-   direction state machine in the initial M9 contract.
+### Style transitions and explicit timelines are distinct
+
+M9 has two motion sources:
+
+1. **Style transitions** animate resolved target changes from ordinary style
+   resolution, including canonical hover/focus/active/disabled changes. Interruption
+   starts from the currently sampled presented value, so reversal is continuous.
+2. **Explicit timelines** are declarative keyframes for motion not caused by a style
+   target change. They carry stable authored animation ID, duration, delay, ordered
+   normalized keyframes, easing, and repeat policy: once, finite count, or forever.
+   Reversed behavior is authored with reversed keyframes in initial M9.
 
 Transition policy participates in style authoring but is not itself a target visual
-property. Explicit timeline descriptions remain transient authoring input; the live
-runtime state they create is mounted-generation-owned.
+property. Timeline descriptions are transient authoring; live state is exact mounted-
+generation runtime state.
 
-M9 completion is deterministic runtime lifecycle/inspection state. It does not
-create a second callback/action channel. If a later product requires application
-actions on animation completion, those actions must enter the accepted canonical FIFO
-through a separately reviewed public contract.
+When an explicit timeline and style transition address the same property, the
+explicit timeline is the sole sampled owner while active. A style target may continue
+to change underneath it but does not start a competing transition. When the timeline
+ends/cancels/removes, runtime resolves the current style target and, if transition
+policy applies, transitions from the timeline's final/current sampled value to that
+target. There is never additive blending of two same-property motion authorities in
+initial M9.
 
-### Runtime owns live animation state and one clock sample
+Animation completion is deterministic runtime lifecycle/inspection state, not a new
+callback/action path. Future completion actions must enter the canonical FIFO through
+a separately reviewed public contract.
+
+### Runtime owns live motion and one time sample
 
 `runenui_runtime` owns live transition/timeline records keyed by exact mounted
-lifetime and property/animation identity. It uses only the accepted
-`MonotonicClock`.
+lifetime and property/animation identity. Only the accepted `MonotonicClock` is used.
 
-For each staged surface candidate runtime snapshots one monotonic instant and uses
-that same instant for all motion sampled into that candidate. No renderer timestamp,
-wall-clock read, sleep, background animation thread, second scheduler, or per-frame
-action queue is allowed.
+One staged surface candidate snapshots one monotonic instant for all motion sampled
+into that candidate. No renderer timestamp, wall-clock read, sleep, background
+animation thread, second scheduler, or per-frame action queue is allowed.
 
-Reconciliation semantics are exact:
+Reconciliation/lifecycle rules:
 
-- unchanged explicit animation identity/specification preserves the live timeline;
-- changed specification under the same ID cancels/replaces the prior generation at
-  the current runtime time;
-- removal cancels it;
-- mounted replacement/removal and shutdown cancel the exact mounted generation;
-- a style target change replaces a same-property transition from the current sampled
-  value;
-- zero-duration transitions/timelines resolve synchronously to their terminal sample
-  in the next staged publication and do not create a fake one-frame animation.
+- unchanged explicit animation ID/spec preserves progress;
+- changed spec under same ID cancels/replaces at current runtime time;
+- removal cancels;
+- mounted replacement/removal/shutdown cancels exact mounted generation;
+- style target replacement starts from current sampled presented value;
+- zero-duration motion reaches terminal sample in the next staged publication with
+  no fake one-frame animation;
+- finite timelines complete after final iteration;
+- forever timelines never complete naturally.
 
-Finite timelines complete after their final iteration. Forever timelines never
-complete naturally. Completion/cancellation cleanup is committed atomically with
-runtime-owned state/publication planning; renderer success/failure is not the clock
-or completion trigger.
+Completion/cancellation cleanup commits with runtime-owned state/publication planning.
+Renderer success/failure is never the clock or completion trigger.
 
-### Active motion uses existing redraw/wake authority
+### Existing redraw/wake authority drives frames
 
-Active visible motion keeps the accepted redraw authority live. After a redraw is
-acknowledged, runtime may issue the next redraw request while visible animation
-remains active; the host's normal presentation/vsync loop chooses actual frame
-cadence. Sampling always uses runtime monotonic time.
+Visible active motion keeps redraw authority live. After redraw acknowledgement,
+runtime may request another redraw while motion remains active; host presentation or
+vsync determines actual frame cadence. Sampling still uses runtime monotonic time.
 
-Headless tests advance `ManualClock` explicitly. The runtime must not create one
-canonical FIFO envelope per animation sample. Timers may be used for future delayed
-start/end readiness where appropriate, but they remain the accepted timer authority
-and are not a second animation clock.
+Headless proof advances `ManualClock`. Runtime does not enqueue a canonical FIFO item
+per sample. Existing timers may wake delayed starts/terminal deadlines but remain the
+same timer/time authority, not an animation clock.
 
-### Animatable properties have an explicit compatibility matrix
+### Animatability is explicit per property
 
-M9 never infers animatability from `Add`, `Lerp`, `Into<f32>`, or matching Rust enum
-variants. Each property has an explicit interpolation and downstream-effect rule.
+M9 never infers animatability from generic numeric traits.
 
-Initial continuous families include:
+Initial continuous families:
 
-- `Color` and compatible brush colors/gradient stops;
-- scene/group opacity;
+- compatible color/brush/gradient-stop colors;
+- item/group opacity;
 - presentation translation/scale/rotation/origin;
-- corner radius and shadow numeric/color fields;
-- compatible logical lengths/spacing/layout dimensions where both endpoints share
-  one interpolation domain.
+- corner radius;
+- compatible shadow numeric/color fields;
+- compatible logical lengths/spacing/layout dimensions when endpoints share one
+  interpolation domain.
 
-Initial discrete families include:
+Initial discrete families:
 
 - resource identity;
-- image fit mode and incompatible crop/nine-slice structure;
 - path topology/morphing;
 - incompatible gradient kind/stop structure;
+- image fit and incompatible crop/nine-slice structure;
 - `auto`/intrinsic versus numeric layout modes;
 - typography/font/shaping identity changes.
 
-A discrete property remains at the start value until the defined transition boundary
-and then switches exactly to the target; its downstream invalidation occurs at that
-switch. M9 does not fake text-metric animation with renderer scale. If typography or
-another text-metric property changes, the accepted text/layout authority recomputes
-at the exact switch/sample required by its explicit rule.
+Discrete values retain start value until their defined switch boundary, then change
+exactly once and invalidate their exact dependencies. M9 never substitutes renderer
+scale for text-metric animation.
 
-### Property effects extend M8 classification rather than bypass it
+### M8 property-effect classification is extended, not bypassed
 
-The M8 property-effect model expands beyond `layout`/`paint` so runtime can represent
-the exact direct dependency classes required by M9, including presentation/hit/
-semantic consequences. The model remains a direct-effect classification; runtime
-propagates transitive dependencies.
+The direct-effect model expands beyond `layout`/`paint` as required for M9 while
+runtime remains responsible for transitive propagation.
 
 Examples:
 
 - foreground/brush color: paint only;
-- group opacity/shadow: paint plus effect/damage bounds, not layout/hit/semantic;
+- opacity/shadow: paint/effect bounds, not layout/hit/semantic;
 - presentation transform: paint + hit + focus + semantic presentation geometry,
-  without relayout;
-- padding or numeric layout size: layout, then dependent text/paint/hit/focus/
-  semantics;
-- typography: text measurement/layout plus all dependent products.
+  without layout;
+- padding/numeric size: layout then dependent text/paint/hit/focus/semantics;
+- typography: text/layout plus all dependent products.
 
-No animation sample may use unconditional invalidate-all when a narrower accepted
-dependency class is sufficient, and no paint-only classification may leave visible
-interaction/accessibility geometry stale.
+No sample may use unconditional invalidate-all when a narrower class is sufficient,
+and no paint-only classification may leave visible interaction/accessibility stale.
 
-### Reduced motion is explicit deterministic policy
+### Reduced motion is deterministic framework policy
 
-`StylePreferences::reduced_motion` remains the input authority. Every motion
-description has an explicit reduced-motion strategy selected from a bounded
-RunenUI-owned policy, with safe framework defaults:
+`StylePreferences::reduced_motion` remains the sole input. Each motion description has
+a bounded reduced-motion strategy with safe defaults:
 
-- ordinary style transitions default to `SnapToEnd`;
-- finite decorative timelines default to `SnapToEnd`;
-- repeating/forever decorative timelines default to `HoldInitial`;
-- preserving motion while reduced motion is active requires an explicit
-  `PreserveEssential` declaration.
+- ordinary transitions: `SnapToEnd`;
+- finite decorative timelines: `SnapToEnd`;
+- repeating/forever decorative timelines: `HoldInitial`;
+- preserving motion requires explicit `PreserveEssential`.
 
-The runtime enforces the strategy before starting/replacing live motion. There is no
-renderer/platform-global override and no hidden duration multiplier. Preference
-changes invalidate/cancel/re-sample only affected motion and dependent products.
+`SnapToEnd` produces terminal value and completes/cancels live decorative motion.
+`HoldInitial` holds the first value, suppresses the live timeline, and issues no
+continuous redraw while reduced motion remains active. If reduced motion later turns
+off, a suppressed repeating timeline restarts from the preference-change instant; it
+does not silently accrue hidden elapsed time. `PreserveEssential` continues normally.
+
+There is no ambient renderer/platform policy and no hidden duration multiplier.
+Preference changes invalidate only affected motion and dependent products.
 
 ### Staged publication remains atomic
 
-Motion sampling is part of staged surface planning. A recoverable/terminal failure
-cannot expose a partial combination such as new paint with old hit/semantic geometry
-or a newly committed transition sample without its corresponding publication facts.
+Motion sampling is part of staged surface planning. Recoverable/terminal failure
+cannot expose mixed sampled generations such as new paint with old hit/semantic
+geometry or commit a sample without corresponding publication facts.
 
-Renderer failure never mutates runtime motion state. Retained publication retry uses
-the exact already-sampled publication. Later successful runtime publication may
-sample a later clock instant; renderer retry is not required to replay every missed
-intermediate frame.
+Renderer failure never mutates runtime motion state. Retained retry uses the exact
+already-sampled publication. A later runtime publication may sample a later clock
+instant; renderer retry need not replay missed intermediate frames.
 
-### Damage and effect bounds become truthful but remain publication metadata
+### Damage/effect bounds are truthful metadata
 
-M6 permits full-surface damage. M9 may introduce narrower damage only after logical
-primitive/stroke/shadow/group bounds are deterministic. Damage remains publication
-metadata and never part of scene/resource identity.
+M6 full-surface damage remains valid. Narrower M9 damage is permitted only after
+logical primitive/stroke/shadow/group bounds are deterministic. Damage is publication
+metadata, never scene/resource identity.
 
-Path/stroke/shadow bounds used for inspection/damage are framework-computed logical
-facts. Renderer tessellation/blur extent may be conservative subordinate detail but
-must never shrink coverage below the accepted logical effect bound.
+Logical path/stroke/shadow/group bounds are framework facts. Renderer tessellation/
+blur may use conservative subordinate bounds but cannot shrink accepted coverage.
 
-### Diagnostics and trace observe one authority
+### Diagnostics/trace observe one authority
 
-M9 adds inspectable records for target changes, transition/timeline start/replacement/
-cancellation/completion, sampled normalized progress, reduced-motion decision,
-property effect classification, scene-group/effect bounds, and renderer capability
-rejection. These extend existing runtime/scene/trace inspection; they do not create a
-second event log or mutable animation debugger authority.
+M9 extends canonical inspection with target changes, timeline/transition start,
+replacement, suppression, cancellation, completion, sampled normalized progress,
+reduced-motion decision, property-effect classification, group/effect bounds, and
+renderer-capability rejection. It does not add a mutable second animation log.
 
-### No new production crate is justified by A0
+### No new production crate is justified
 
-M9 begins inside existing ownership:
+Initial ownership stays in existing crates:
 
-- `runenui_core`: neutral visual/motion description values;
-- `runenui_runtime`: live timeline/transition state, sampling, dependency propagation,
-  correlated geometry/publication;
-- `runenui_render_wgpu`: Lyon-backed/disposable realization, gradient/shadow/group GPU
-  work and caches;
-- `runenui_testing`: public deterministic ergonomics only if ordinary public seams
-  need wrappers.
+- `runenui_core`: neutral visual/motion values;
+- `runenui_runtime`: live motion, sampling, invalidation, correlated publication;
+- `runenui_render_wgpu`: private Lyon/disposable GPU realization;
+- `runenui_testing`: public testing ergonomics only if ordinary public seams need it.
 
-A separate `runenui_animation` or `runenui_vector` crate is not justified. Extract
-only if later dependency/optionality/multi-consumer pressure gives Cargo a real
-boundary to enforce.
+No `runenui_animation`/`runenui_vector` crate is created by concept alone. Extract
+only for real dependency/optionality/multi-consumer pressure.
 
-### Existing `element.rs` concentration is not an M9 prerequisite
+### `element.rs` concentration does not block M9A0
 
-Issue #10 identifies real historical concentration, but current M9 responsibilities
-already have coherent owners in `style`, `paint`, `scene_geometry`, runtime surface,
-and renderer modules. A0 does not authorize a broad `element.rs` split.
+Issue #10 identifies historical concentration, but M9 has focused owners in style,
+paint, scene geometry, runtime surface, and renderer modules. A0 does not authorize a
+broad split.
 
-New visual/motion value types should live in focused modules and element authoring
-should delegate rather than accumulate independent implementation logic. If an
-implementation slice proves change-coupling that cannot be contained that way, a
-separate behavior-preserving internal decomposition may be scheduled; file length
-alone is not evidence.
+New visual/motion values belong in focused modules and element authoring delegates to
+those values. If implementation proves uncontainable change-coupling, schedule a
+separate behavior-preserving decomposition. File length alone is not evidence.
 
 ## Derived serial implementation sequence
 
-After A0 is accepted-main validated, derive child issues in this order:
+After accepted-main validation of A0, derive child issues in this order:
 
 1. **M9A — production visual/composition vocabulary and real-wgpu realization**:
-   shapes/paths/strokes/brushes/images/nine-slice/groups/shadows, logical bounds/hit
-   correlation, private Lyon adoption, and renderer realization with no motion yet.
-2. **M9B — deterministic transitions and timelines**: runtime-owned transition/
-   timeline lifecycle, sampling, property interpolation/effects, redraw behavior,
-   reduced-motion, and exact presentation-geometry correlation.
-3. **M9C — integrated production closure**: public headless/manual-time corpus,
-   representative hover/focus/active transitions, responsive/layout/text-affecting
-   motion, real-wgpu visual/motion evidence, retained retry/re-realization, and final
-   obsolete-authority cleanup.
+   shapes/paths/strokes/brushes/images/nine-slice/groups/shadows, logical bounds/hit,
+   private Lyon adoption, and renderer realization; no motion yet.
+2. **M9B — deterministic transitions and timelines**: runtime lifecycle/sampling,
+   same-property precedence, interpolation/effects, redraw, reduced motion, and exact
+   presentation-geometry correlation.
+3. **M9C — integrated production closure**: public manual-time corpus,
+   hover/focus/active transitions, layout/text-affecting motion, real-wgpu visual/
+   motion evidence, retained retry/re-realization, and final authority cleanup.
 
-Do not create those implementation issues until this A0 package is owner-accepted,
-squash-merged, and accepted-main validated.
+Do not create implementation child issues until A0 is owner-accepted, squash-merged,
+and accepted-main validated.
 
 ## Consequences
 
-- Common application/game visuals become expressible without backend-specific widget
-  semantics.
-- Hover/focus/active style state from M8 can transition smoothly without a second
-  interaction state machine.
-- Animated presentation geometry remains physically and semantically truthful.
-- Public APIs remain stable against renderer/library churn because Lyon is private and
-  Peniko/Vello types do not leak.
-- Renderer implementation grows in complexity for paths, gradients, groups, and
-  shadows, but that complexity remains disposable realization state.
-- Some breadth is deliberately deferred: arbitrary shaders/filters, path morphing,
-  conic gradients, generic animation-completion callbacks, and design-tool timelines.
+- Common production desktop/game visuals are neutral-contract expressible.
+- M8 hover/focus/active state can transition without duplicate interaction state.
+- Animated presentation geometry stays physically and semantically truthful.
+- Public APIs are insulated from Lyon/Peniko/Vello/backend churn.
+- Renderer complexity grows for paths, gradients, groups, and shadows, but remains
+  disposable realization state.
+- Deferred breadth includes arbitrary shaders/filters, path morphing, conic gradients,
+  additive same-property animation layers, generic completion callbacks, and visual
+  animation editors.
 
 ## Validation obligations
 
-M9 implementation cannot claim conformance from this ADR alone. Permanent observable
-requirements live in the M9 conformance matrix. Each implementation slice must use a
-fresh branch from accepted `main`, prove exact dependency patch/features/MSRV/license
-when first adopting Lyon, run canonical `cargo validate`, pass exact-head hosted CI,
-receive complete-diff cold review with zero unresolved review debt, then undergo the
-same separate accepted-main/current-truth reconciliation discipline used by M8.
+The M9 conformance matrix owns permanent observations. Each implementation slice must
+start from accepted `main`, revalidate exact dependency versions/features/MSRV/
+licenses when first adopting Lyon, run canonical `cargo validate`, pass exact-head
+hosted CI, receive complete-diff cold review with zero unresolved debt, and undergo
+bounded accepted-main/current-truth reconciliation before rows are promoted.
