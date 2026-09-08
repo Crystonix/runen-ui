@@ -10,6 +10,9 @@ pub enum StyleProperty {
     Padding,
     Radius,
     Typography,
+    Outline,
+    Shadows,
+    Opacity,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -53,7 +56,12 @@ impl StyleProperty {
     #[must_use]
     pub const fn effects(self) -> StyleEffects {
         match self {
-            Self::Foreground | Self::Background | Self::Radius => StyleEffects::PAINT,
+            Self::Foreground
+            | Self::Background
+            | Self::Radius
+            | Self::Outline
+            | Self::Shadows
+            | Self::Opacity => StyleEffects::PAINT,
             Self::Padding | Self::Typography => StyleEffects::LAYOUT,
         }
     }
@@ -81,6 +89,15 @@ pub fn style_effects_between(old: &ComputedStyle, new: &ComputedStyle) -> StyleE
     }
     if old.typography() != new.typography() {
         effects = effects.union(StyleProperty::Typography.effects());
+    }
+    if old.outline() != new.outline() {
+        effects = effects.union(StyleProperty::Outline.effects());
+    }
+    if old.shadows() != new.shadows() {
+        effects = effects.union(StyleProperty::Shadows.effects());
+    }
+    if old.opacity() != new.opacity() {
+        effects = effects.union(StyleProperty::Opacity.effects());
     }
     effects
 }
