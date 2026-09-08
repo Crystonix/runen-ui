@@ -27,10 +27,7 @@ const SURFACE_WIDTH: u16 = 32;
 const SURFACE_HEIGHT: u16 = 24;
 const RASTER_SCALE: f32 = 2.0;
 const IMAGE_PIXELS: [u8; 16] = [
-    0xFF, 0x00, 0x00, 0xFF,
-    0x00, 0xFF, 0x00, 0xFF,
-    0x00, 0x00, 0xFF, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 ];
 const PNG_FIXTURE: &[u8] = include_bytes!("fixtures/provider_image.png");
 
@@ -228,8 +225,8 @@ fn real_gpu_image_semantics_match_scene_contract() -> Result<(), Box<dyn Error>>
     let transformed_image = image_item(image_ref.clone(), rect(2.0, 2.0, 8.0, 8.0))
         .with_transform(image_transform)
         .with_clip(clip);
-    let translucent_image = image_item(image_ref, rect(16.0, 4.0, 8.0, 8.0))
-        .with_opacity(SceneOpacity::new(0.5)?);
+    let translucent_image =
+        image_item(image_ref, rect(16.0, 4.0, 8.0, 8.0)).with_opacity(SceneOpacity::new(0.5)?);
     let overlay = Color::rgb(0xE0, 0xA0, 0x20);
     let publication = publication(vec![
         fill_rect(
@@ -280,7 +277,11 @@ fn real_gpu_image_semantics_match_scene_contract() -> Result<(), Box<dyn Error>>
         current.update_plan().mode(),
         runenui_render_wgpu::PublicationUpdateMode::AlreadyCurrent
     );
-    assert_eq!(provider.loads(), 1, "already-current image render reuses realization");
+    assert_eq!(
+        provider.loads(),
+        1,
+        "already-current image render reuses realization"
+    );
     assert_eq!(current.readback().rgba8_srgb(), readback.rgba8_srgb());
     Ok(())
 }
@@ -311,7 +312,10 @@ fn png_provider_normalizes_complete_domain_and_reuses_image_cache() -> Result<()
         current.observation().resource_observations()[0].cache_outcome(),
         runenui_render_wgpu::ResourceCacheOutcome::Reused
     );
-    assert_eq!(current.readback().rgba8_srgb(), first.readback().rgba8_srgb());
+    assert_eq!(
+        current.readback().rgba8_srgb(),
+        first.readback().rgba8_srgb()
+    );
     Ok(())
 }
 
