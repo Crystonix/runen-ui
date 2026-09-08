@@ -1,9 +1,9 @@
 //! Renderer-neutral owner-local paint contribution vocabulary.
 
 use crate::{
-    Brush, Color, ComputedStyle, ContributionClip, LogicalPoint, LogicalRect, LogicalSize,
-    LogicalTransform, ResourceKind, ResourceKindMismatch, ResourceRef, SceneLayer, SceneOpacity,
-    SceneShape, StrokeStyle,
+    Brush, Color, ComputedStyle, ContributionClip, ImageIntrinsicSize, ImagePaintDescriptor,
+    LogicalPoint, LogicalRect, LogicalSize, LogicalTransform, ResourceKind, ResourceKindMismatch,
+    ResourceRef, SceneLayer, SceneOpacity, SceneShape, StrokeStyle,
 };
 
 /// Read-only facts supplied while one mounted widget contributes paint.
@@ -78,26 +78,121 @@ impl PaintContribution {
     }
 }
 
-/// One validated image paint primitive.
+/// Exact runtime-resolved source rectangle in intrinsic image-pixel space.
 ///
-/// This is the inherited M6 exact-mapped image authority and remains only until
-/// the separate M9 image-descriptor clean cutover. Fill/stroke authority no
-/// longer depends on this rectangle-specific representation.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ImagePrimitive {
-    resource: ResourceRef,
+/// This value is publication geometry, not authored fit/crop policy and not a
+/// renderer UV or raster/device coordinate.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ResolvedImageSourceRect {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
+impl ResolvedImageSourceRect {
+    /// Runtime bridge for one finite non-negative source rectangle.
+    ///
+    /// The runtime derives these values only from an already-validated image
+    /// descriptor and its exact intrinsic extent.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn __runtime_new(x: f32, y: f32, width: f32, height: f32) -> Option<Self> {
+        if ![x, y, width, height].into_iter().all(f32::is_finite)
+            || x < 0.0
+            || y < 0.0
+            || width < 0.0
+            || height < 0.0
+        {
+            return None;
+        }
+        Some(Self {
+            x,
+            y,
+            width,
+            height,
+        })
+    }
+
+    /// Returns intrinsic-pixel source x.
+    #[must_use]
+    pub const fn x(self) -> f32 {
+        self.x
+    }
+
+    /// Returns intrinsic-pixel source y.
+    #[must_use]
+    pub const fn y(self) -> f32 {
+        self.y
+    }
+
+    /// Returns intrinsic-pixel source width.
+    #[must_use]
+    pub const fn width(self) -> f32 {
+        self.width
+    }
+
+    /// Returns intrinsic-pixel source height.
+    #[must_use]
+    pub const fn height(self) -> f32 {
+        self.height
+    }
+}
+
+/// One exact runtime-resolved image source/destination mapping patch.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ResolvedImagePatch {
+    source: ResolvedImageSourceRect,
     destination: LogicalRect,
 }
 
-impl ImagePrimitive {
-    /// Creates an image primitive from an image-kind resource reference.
+impl ResolvedImagePatch {
+    /// Runtime bridge for one already-resolved image patch.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn __runtime_new(source: ResolvedImageSourceRect, destination: LogicalRect) -> Self {
+        Self {
+            source,
+            destination,
+        }
+    }
+
+    /// Returns the exact intrinsic-pixel source rectangle.
+    #[must_use]
+    pub const fn source(self) -> ResolvedImageSourceRect {
+        self.source
+    }
+
+    /// Returns the exact owner-local logical destination rectangle.
+    #[must_use]
+    pub const fn destination(self) -> LogicalRect {
+        self.destination
+    }
+}
+
+/// Runtime-resolved image publication facts.
+///
+/// Fit/crop/alignment/nine-slice policy is deliberately absent. The complete
+/// `ResourceRef`, exact descriptor intrinsic extent, and final source/destination
+/// patches are sufficient for disposable renderer realization.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedImagePrimitive {
+    resource: ResourceRef,
+    intrinsic_size: ImageIntrinsicSize,
+    patches: Vec<ResolvedImagePatch>,
+}
+
+impl ResolvedImagePrimitive {
+    /// Runtime bridge for exact resolved image publication facts.
     ///
     /// # Errors
     ///
-    /// Returns [`ResourceKindMismatch`] when `resource` is not an image.
-    pub fn new(
+    /// Returns [`ResourceKindMismatch`] when `resource` is not image-kind.
+    #[doc(hidden)]
+    pub fn __runtime_new(
         resource: ResourceRef,
-        destination: LogicalRect,
+        intrinsic_size: ImageIntrinsicSize,
+        patches: Vec<ResolvedImagePatch>,
     ) -> Result<Self, ResourceKindMismatch> {
         if resource.kind() != ResourceKind::Image {
             return Err(ResourceKindMismatch::new(
@@ -107,20 +202,88 @@ impl ImagePrimitive {
         }
         Ok(Self {
             resource,
-            destination,
+            intrinsic_size,
+            patches,
         })
     }
 
-    /// Returns the complete opaque image-resource reference.
+    /// Returns the unchanged complete opaque image-resource reference.
     #[must_use]
     pub const fn resource_ref(&self) -> &ResourceRef {
         &self.resource
     }
 
-    /// Returns the exact owner-local logical destination rectangle.
+    /// Returns the exact descriptor intrinsic extent retained for provider correlation.
     #[must_use]
-    pub const fn destination(&self) -> LogicalRect {
-        self.destination
+    pub const fn intrinsic_size(&self) -> ImageIntrinsicSize {
+        self.intrinsic_size
+    }
+
+    /// Returns final resolved source/destination patches in deterministic order.
+    #[must_use]
+    pub const fn patches(&self) -> &[ResolvedImagePatch] {
+        self.patches.as_slice()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum ImagePrimitivePhase {
+    Authored(ImagePaintDescriptor),
+    Resolved(ResolvedImagePrimitive),
+}
+
+/// Image paint primitive with an explicit authored-to-publication phase boundary.
+///
+/// Owner-local contributions carry an [`ImagePaintDescriptor`]. The runtime
+/// replaces that authored policy with [`ResolvedImagePrimitive`] before creating
+/// a `PaintSceneItem`; renderer-visible image geometry therefore never requires
+/// fit/crop/nine-slice interpretation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImagePrimitive {
+    phase: ImagePrimitivePhase,
+}
+
+impl ImagePrimitive {
+    const fn authored(descriptor: ImagePaintDescriptor) -> Self {
+        Self {
+            phase: ImagePrimitivePhase::Authored(descriptor),
+        }
+    }
+
+    /// Runtime bridge for replacing authored image policy with resolved publication facts.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn __runtime_resolved(resolved: ResolvedImagePrimitive) -> Self {
+        Self {
+            phase: ImagePrimitivePhase::Resolved(resolved),
+        }
+    }
+
+    /// Returns the complete opaque image-resource reference in either phase.
+    #[must_use]
+    pub const fn resource_ref(&self) -> &ResourceRef {
+        match &self.phase {
+            ImagePrimitivePhase::Authored(descriptor) => descriptor.image().resource_ref(),
+            ImagePrimitivePhase::Resolved(resolved) => resolved.resource_ref(),
+        }
+    }
+
+    /// Returns owner-authored image policy when this value is still contribution-local.
+    #[must_use]
+    pub const fn authored_descriptor(&self) -> Option<&ImagePaintDescriptor> {
+        match &self.phase {
+            ImagePrimitivePhase::Authored(descriptor) => Some(descriptor),
+            ImagePrimitivePhase::Resolved(_) => None,
+        }
+    }
+
+    /// Returns runtime-resolved image publication facts when this value is scene-ready.
+    #[must_use]
+    pub const fn resolved(&self) -> Option<&ResolvedImagePrimitive> {
+        match &self.phase {
+            ImagePrimitivePhase::Authored(_) => None,
+            ImagePrimitivePhase::Resolved(resolved) => Some(resolved),
+        }
     }
 }
 
@@ -223,17 +386,10 @@ impl PaintContributionItem {
         })
     }
 
-    /// Creates an image item with exact owner-local logical placement.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ResourceKindMismatch`] when `resource` is not image-kind.
-    pub fn image(
-        resource: ResourceRef,
-        destination: LogicalRect,
-    ) -> Result<Self, ResourceKindMismatch> {
-        ImagePrimitive::new(resource, destination)
-            .map(|image| Self::from_primitive(PaintPrimitive::Image(image)))
+    /// Creates one owner-local image item from complete validated image paint policy.
+    #[must_use]
+    pub const fn image(descriptor: ImagePaintDescriptor) -> Self {
+        Self::from_primitive(PaintPrimitive::Image(ImagePrimitive::authored(descriptor)))
     }
 
     /// Creates a shaped-text-run item with exact owner-local origin and literal foreground.
@@ -321,7 +477,7 @@ pub enum PaintPrimitive {
         brush: Brush,
         style: StrokeStyle,
     },
-    /// Inherited exact-mapped image resource pending the separate M9 image cutover.
+    /// Image contribution/publication value with an explicit authored/resolved phase boundary.
     Image(ImagePrimitive),
     /// Shaped resource whose local origin is placed at one finite logical point.
     ShapedTextRun(ShapedTextRunPrimitive),
@@ -365,7 +521,7 @@ impl PaintPrimitive {
         }
     }
 
-    /// Returns image-specific placement facts when this is an image primitive.
+    /// Returns image-specific authored/resolved facts when this is an image primitive.
     #[must_use]
     pub const fn as_image(&self) -> Option<&ImagePrimitive> {
         match self {
@@ -386,9 +542,10 @@ impl PaintPrimitive {
 
 #[cfg(test)]
 mod tests {
-    use super::{ImagePrimitive, PaintContribution, PaintContributionItem, PaintPrimitive};
+    use super::{PaintContribution, PaintContributionItem, PaintPrimitive};
     use crate::{
-        Brush, Color, ContributionClip, LogicalLength, LogicalPoint, LogicalRect, LogicalTransform,
+        Brush, Color, ContributionClip, ImageDescriptor, ImageIntrinsicSize, ImageMapping,
+        ImagePaintDescriptor, LogicalLength, LogicalPoint, LogicalRect, LogicalTransform,
         ResourceKind, ResourceKindMismatch, ResourceRef, SceneLayer, SceneOpacity, SceneShape,
         StrokeStyle,
     };
@@ -452,16 +609,23 @@ mod tests {
     }
 
     #[test]
-    fn resource_primitives_validate_kind_and_preserve_placement_and_foreground() {
+    fn resource_primitives_preserve_authored_image_policy_and_shaped_run_facts() {
         let rect = LogicalRect::try_new(2.0, 3.0, 40.0, 50.0)
             .unwrap_or_else(|_| unreachable!("test destination is valid"));
         let origin =
             LogicalPoint::new(4.0, 7.0).unwrap_or_else(|_| unreachable!("test origin is finite"));
         let image_ref = ResourceRef::new(ResourceKind::Image);
         let shaped_ref = ResourceRef::new(ResourceKind::ShapedTextRun);
+        let image_descriptor = ImageDescriptor::new(
+            image_ref.clone(),
+            ImageIntrinsicSize::new(40, 50)
+                .unwrap_or_else(|| unreachable!("test image extent is non-zero")),
+        )
+        .unwrap_or_else(|_| unreachable!("image ref has image kind"));
+        let image_paint = ImagePaintDescriptor::new(image_descriptor, rect, ImageMapping::default())
+            .unwrap_or_else(|_| unreachable!("test image mapping is valid"));
 
-        let image = PaintContributionItem::image(image_ref.clone(), rect)
-            .unwrap_or_else(|_| unreachable!("image ref has image kind"));
+        let image = PaintContributionItem::image(image_paint.clone());
         let run = PaintContributionItem::shaped_text_run(
             shaped_ref.clone(),
             origin,
@@ -474,8 +638,15 @@ mod tests {
             image
                 .primitive()
                 .as_image()
-                .map(ImagePrimitive::destination),
-            Some(rect)
+                .and_then(super::ImagePrimitive::authored_descriptor),
+            Some(&image_paint)
+        );
+        assert!(
+            image
+                .primitive()
+                .as_image()
+                .and_then(super::ImagePrimitive::resolved)
+                .is_none()
         );
         assert_eq!(run.primitive().resource_ref(), Some(&shaped_ref));
         assert_eq!(
@@ -491,13 +662,6 @@ mod tests {
             Some(Color::rgba(1, 2, 3, 4))
         );
 
-        let Err(wrong_image) = PaintContributionItem::image(shaped_ref, rect) else {
-            unreachable!("shaped-run refs cannot become image primitives");
-        };
-        assert_eq!(
-            wrong_image,
-            ResourceKindMismatch::new(ResourceKind::Image, ResourceKind::ShapedTextRun)
-        );
         let Err(wrong_run) =
             PaintContributionItem::shaped_text_run(image_ref, origin, Color::BLACK)
         else {
