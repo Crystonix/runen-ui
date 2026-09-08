@@ -45,7 +45,7 @@ impl Widget<Action> for PaintProbe {
 
     fn paint(&self, (): &Self::State, context: PaintContributionContext) -> PaintContribution {
         self.paint_calls.set(self.paint_calls.get() + 1);
-        let Some(color) = context.computed_style().background() else {
+        let Some(brush) = context.computed_style().background() else {
             return PaintContribution::empty();
         };
         let size = context.local_size();
@@ -55,7 +55,7 @@ impl Widget<Action> for PaintProbe {
             });
         PaintContribution::single(PaintContributionItem::fill(
             SceneShape::rect(rect),
-            Brush::solid(color),
+            brush.clone(),
         ))
     }
 }
