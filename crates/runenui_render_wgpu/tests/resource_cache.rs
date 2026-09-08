@@ -81,7 +81,7 @@ fn rect(x: f32, y: f32, width: f32, height: f32) -> LogicalRect {
         .unwrap_or_else(|_| unreachable!("fixture rectangle is valid"))
 }
 
-fn fill_rect(rect: LogicalRect, color: Color) -> PaintContributionItem {
+const fn fill_rect(rect: LogicalRect, color: Color) -> PaintContributionItem {
     PaintContributionItem::fill(SceneShape::rect(rect), Brush::solid(color))
 }
 
