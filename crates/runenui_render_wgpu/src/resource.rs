@@ -65,27 +65,34 @@ impl ImagePayload {
         })
     }
 
+    /// Returns the non-zero pixel width.
     #[must_use]
     pub const fn width(&self) -> u32 {
         self.width
     }
 
+    /// Returns the non-zero pixel height.
     #[must_use]
     pub const fn height(&self) -> u32 {
         self.height
     }
 
+    /// Returns tightly packed unpremultiplied RGBA8 sRGB bytes.
+    #[must_use]
     pub fn rgba8_srgb(&self) -> &[u8] {
         &self.rgba8_srgb
     }
 }
 
+/// Renderer request made to the caller-owned logical resource provider.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResourceRequest {
+    /// Resolve an immutable normalized image source.
     Image,
 }
 
 impl ResourceRequest {
+    /// Returns the exact neutral resource kind required by this request.
     #[must_use]
     pub const fn resource_kind(self) -> ResourceKind {
         match self {
@@ -94,12 +101,14 @@ impl ResourceRequest {
     }
 }
 
+/// Immutable logical payload returned by a caller-owned resource provider.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ResourcePayload {
     Image(ImagePayload),
 }
 
 impl ResourcePayload {
+    /// Returns the neutral kind represented by this payload.
     #[must_use]
     pub const fn resource_kind(&self) -> ResourceKind {
         match self {
@@ -108,6 +117,7 @@ impl ResourcePayload {
     }
 }
 
+/// Structured caller-provider failure category.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResourceProviderErrorKind {
     Missing,
@@ -116,6 +126,7 @@ pub enum ResourceProviderErrorKind {
 }
 
 impl ResourceProviderErrorKind {
+    /// Stable diagnostic code for this provider failure category.
     #[must_use]
     pub const fn code(self) -> &'static str {
         match self {
@@ -126,6 +137,7 @@ impl ResourceProviderErrorKind {
     }
 }
 
+/// Structured error returned by a caller-owned resource provider.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResourceProviderError {
     kind: ResourceProviderErrorKind,
@@ -151,6 +163,7 @@ impl ResourceProviderError {
         self.kind.code()
     }
 
+    #[must_use]
     pub fn detail(&self) -> &str {
         &self.detail
     }
@@ -164,7 +177,17 @@ impl fmt::Display for ResourceProviderError {
 
 impl Error for ResourceProviderError {}
 
+/// Caller-owned external-resource lookup.
+///
+/// The complete opaque [`ResourceRef`] is the lookup key. Implementations must
+/// not derive a provider/domain/cache key from its debug representation or kind.
 pub trait ResourceProvider {
+    /// Resolves one external resource for the exact renderer request.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured provider error when the resource is missing,
+    /// temporarily unavailable, or cannot produce the requested logical payload.
     fn load(
         &self,
         resource: &ResourceRef,
@@ -229,6 +252,12 @@ impl Error for ResourceResolveError {
     }
 }
 
+/// Resolves one external resource while enforcing complete-ref and kind consistency.
+///
+/// # Errors
+///
+/// Returns deterministic contract failures for reference/request mismatch,
+/// provider failure, or provider payload kind mismatch.
 pub fn resolve_resource<P: ResourceProvider + ?Sized>(
     provider: &P,
     resource: &ResourceRef,
