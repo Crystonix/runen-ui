@@ -195,8 +195,12 @@ fn resolve_nine_slice(
     let source_width = source_x1 - source_x;
     let source_height = source_y1 - source_y;
     let [source_top, source_right, source_bottom, source_left] = source_insets.map(f64::from);
-    let [destination_top, destination_right, destination_bottom, destination_left] =
-        destination_insets.map(f64::from);
+    let [
+        destination_top,
+        destination_right,
+        destination_bottom,
+        destination_left,
+    ] = destination_insets.map(f64::from);
     let destination_width = f64::from(destination.width());
     let destination_height = f64::from(destination.height());
     let (destination_left, destination_right) =
@@ -287,10 +291,7 @@ fn normalize_pair(first: f64, second: f64, available: f64) -> (f64, f64) {
 fn logical_rect_from_edges(x0: f64, y0: f64, x1: f64, y1: f64) -> Option<LogicalRect> {
     let width = x1 - x0;
     let height = y1 - y0;
-    if ![x0, y0, width, height].into_iter().all(f64::is_finite)
-        || width < 0.0
-        || height < 0.0
-    {
+    if ![x0, y0, width, height].into_iter().all(f64::is_finite) || width < 0.0 || height < 0.0 {
         return None;
     }
     let x = x0 as f32;
@@ -487,8 +488,9 @@ mod tests {
     fn destination_reconstruction_keeps_finite_extent_when_far_edge_exceeds_f32() {
         let x = f64::from(f32::MAX) / 2.0;
         let width = f64::from(f32::MAX);
-        let resolved = logical_rect_from_edges(x, 0.0, x + width, 1.0)
-            .unwrap_or_else(|| unreachable!("finite logical origin and extent remain representable"));
+        let resolved = logical_rect_from_edges(x, 0.0, x + width, 1.0).unwrap_or_else(|| {
+            unreachable!("finite logical origin and extent remain representable")
+        });
         assert!(resolved.x().is_finite());
         assert_eq!(resolved.width(), f32::MAX);
         assert_eq!(resolved.height(), 1.0);
