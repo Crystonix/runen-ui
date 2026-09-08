@@ -431,6 +431,10 @@ pub(super) fn vertex_bytes(
     bytes
 }
 
+#[allow(
+    clippy::suboptimal_flops,
+    reason = "resolved image UV reconstruction preserves explicit multiply-then-add evaluation order across renderer backends"
+)]
 fn append_patch_vertices(
     bytes: &mut Vec<u8>,
     image: &SupportedImage,
