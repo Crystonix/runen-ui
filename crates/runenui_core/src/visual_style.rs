@@ -1,50 +1,8 @@
 //! Typed authored values for common M9 node-visual style properties.
 
-use crate::{DropShadow, IdentifierError, Outline, SceneOpacity, TokenId};
-
-macro_rules! define_visual_token_ref {
-    ($name:ident, $doc:literal) => {
-        #[doc = $doc]
-        #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-        pub struct $name(TokenId);
-
-        impl $name {
-            #[must_use]
-            pub const fn new(id: TokenId) -> Self {
-                Self(id)
-            }
-
-            /// Validates a dynamic typed token reference.
-            ///
-            /// # Errors
-            ///
-            /// Returns [`IdentifierError`] when the identifier text is invalid.
-            pub fn parse(id: impl Into<String>) -> Result<Self, IdentifierError> {
-                TokenId::new(id).map(Self)
-            }
-
-            #[must_use]
-            pub const fn id(&self) -> &TokenId {
-                &self.0
-            }
-
-            #[must_use]
-            pub const fn as_str(&self) -> &str {
-                self.0.as_str()
-            }
-        }
-
-        impl From<TokenId> for $name {
-            fn from(id: TokenId) -> Self {
-                Self(id)
-            }
-        }
-    };
-}
-
-define_visual_token_ref!(OutlineToken, "Typed node-outline-token reference.");
-define_visual_token_ref!(ShadowToken, "Typed ordered drop-shadow-list-token reference.");
-define_visual_token_ref!(OpacityToken, "Typed node-opacity-token reference.");
+use crate::{
+    DropShadow, OpacityToken, Outline, OutlineToken, SceneOpacity, ShadowToken,
+};
 
 /// Literal-or-token authored value for the optional node outline.
 #[derive(Clone, Debug, PartialEq)]
