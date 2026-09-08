@@ -188,6 +188,13 @@
 //! use runenui_core::{resolve_literal_style, resolve_style};
 //! ```
 //!
+//! Background token identity is brush-specific; color tokens remain foreground-only.
+//!
+//! ```compile_fail
+//! use runenui_core::{StyleIntent, color_token};
+//! let _ = StyleIntent::EMPTY.with_background(color_token!("color.background"));
+//! ```
+//!
 //! Semantic actions have no semantic scrolling alias:
 //!
 //! ```compile_fail
@@ -338,9 +345,9 @@ pub use semantic::{
 };
 pub use semantic_action::{SemanticActionRequest, SemanticActionTarget};
 pub use style::{
-    Color, ColorToken, ColorValue, EdgeInsets, Radius, RadiusToken, RadiusValue, SpacingToken,
-    SpacingValue, StyleIntent, StyleProperties, StyleRecipeId, StyleVariantId, TokenId,
-    TypographyToken, TypographyValue,
+    BrushToken, BrushValue, Color, ColorToken, ColorValue, EdgeInsets, Radius, RadiusToken,
+    RadiusValue, SpacingToken, SpacingValue, StyleIntent, StyleProperties, StyleRecipeId,
+    StyleVariantId, TokenId, TypographyToken, TypographyValue,
 };
 pub use style_effects::{StyleEffects, StyleProperty, style_effects_between};
 pub use style_environment::{
