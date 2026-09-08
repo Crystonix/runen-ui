@@ -957,10 +957,9 @@ mod tests {
 
     use runenui_core::{
         Brush, Color, ContributionClip, Element, LogicalLength, LogicalPoint, LogicalRect,
-        LogicalSize, LogicalTransform, NoHostProtocol, PaintContribution,
-        PaintContributionContext, PaintContributionItem, PathFillRule, PathVerb, Radius, ScenePath,
-        SceneShape, StyleEnvironment, UiApp, Widget, WidgetInvalidation, WidgetMeasure,
-        WidgetUpdateContext,
+        LogicalSize, LogicalTransform, NoHostProtocol, PaintContribution, PaintContributionContext,
+        PaintContributionItem, PathFillRule, PathVerb, Radius, ScenePath, SceneShape,
+        StyleEnvironment, UiApp, Widget, WidgetInvalidation, WidgetMeasure, WidgetUpdateContext,
     };
     use runenui_runtime::{
         AppRuntime, LayoutConstraints, PaintPublication, RasterScale, SceneClip,
@@ -1158,10 +1157,7 @@ mod tests {
         let singular_publication = publication(
             vec![
                 fill_rect(rect(0.0, 0.0, 64.0, 48.0), Color::WHITE).with_clip(
-                    ContributionClip::new(
-                        SceneShape::rect(rect(0.0, 0.0, 64.0, 48.0)),
-                        singular,
-                    ),
+                    ContributionClip::new(SceneShape::rect(rect(0.0, 0.0, 64.0, 48.0)), singular),
                 ),
             ],
             1.0,
