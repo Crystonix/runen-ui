@@ -51,3 +51,27 @@ macro_rules! typography_token {
         $crate::TypographyToken::new($crate::token_id!($value))
     };
 }
+
+/// Creates a compile-time-validated typed node-outline-token reference.
+#[macro_export]
+macro_rules! outline_token {
+    ($value:literal) => {
+        $crate::OutlineToken::new($crate::token_id!($value))
+    };
+}
+
+/// Creates a compile-time-validated typed ordered-shadow-list-token reference.
+#[macro_export]
+macro_rules! shadow_token {
+    ($value:literal) => {
+        $crate::ShadowToken::new($crate::token_id!($value))
+    };
+}
+
+/// Creates a compile-time-validated typed node-opacity-token reference.
+#[macro_export]
+macro_rules! opacity_token {
+    ($value:literal) => {
+        $crate::OpacityToken::new($crate::token_id!($value))
+    };
+}
