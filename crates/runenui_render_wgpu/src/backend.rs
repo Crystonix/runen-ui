@@ -1636,11 +1636,11 @@ mod tests {
 
     use image::{ImageEncoder, codecs::png::PngEncoder};
     use runenui_core::{
-        Color, ContributionClip, Element, LogicalLength, LogicalPoint, LogicalRect, LogicalSize,
-        LogicalTransform, NoHostProtocol, PaintContribution, PaintContributionContext,
-        PaintContributionItem, PaintPrimitive, Radius, ResourceKind, ResourceRef, SceneOpacity,
-        SceneShape, StyleEnvironment, UiApp, Widget, WidgetInvalidation, WidgetMeasure,
-        WidgetUpdateContext,
+        Brush, Color, ContributionClip, Element, LogicalLength, LogicalPoint, LogicalRect,
+        LogicalSize, LogicalTransform, NoHostProtocol, PaintContribution,
+        PaintContributionContext, PaintContributionItem, PaintPrimitive, Radius, ResourceKind,
+        ResourceRef, SceneOpacity, SceneShape, StrokeStyle, StyleEnvironment, UiApp, Widget,
+        WidgetInvalidation, WidgetMeasure, WidgetUpdateContext,
     };
     use runenui_runtime::{
         AppRuntime, LayoutConstraints, PaintPublication, PumpBudget, RasterScale,
@@ -1717,6 +1717,22 @@ mod tests {
     fn rect(x: f32, y: f32, width: f32, height: f32) -> LogicalRect {
         LogicalRect::try_new(x, y, width, height)
             .unwrap_or_else(|_| unreachable!("fixture rectangle is valid"))
+    }
+
+    fn solid_rect_fill(rect: LogicalRect, color: Color) -> PaintContributionItem {
+        PaintContributionItem::fill(SceneShape::rect(rect), Brush::solid(color))
+    }
+
+    fn solid_rect_stroke(
+        rect: LogicalRect,
+        color: Color,
+        width: LogicalLength,
+    ) -> PaintContributionItem {
+        PaintContributionItem::stroke(
+            SceneShape::rect(rect),
+            Brush::solid(color),
+            StrokeStyle::new(width),
+        )
     }
 
     fn scene_opacity(value: f32) -> SceneOpacity {
@@ -1837,21 +1853,21 @@ mod tests {
             half_opacity: scene_opacity(0.5),
         };
         let items = vec![
-            PaintContributionItem::fill_rect(rect(4.0, 4.0, 6.0, 6.0), case.opaque),
-            PaintContributionItem::fill_rect(rect(12.0, 4.0, 6.0, 6.0), case.literal_alpha),
-            PaintContributionItem::fill_rect(rect(20.0, 4.0, 6.0, 6.0), case.opacity_color)
+            solid_rect_fill(rect(4.0, 4.0, 6.0, 6.0), case.opaque),
+            solid_rect_fill(rect(12.0, 4.0, 6.0, 6.0), case.literal_alpha),
+            solid_rect_fill(rect(20.0, 4.0, 6.0, 6.0), case.opacity_color)
                 .with_opacity(case.half_opacity),
-            PaintContributionItem::fill_rect(rect(28.0, 4.0, 6.0, 6.0), case.alpha_and_opacity)
+            solid_rect_fill(rect(28.0, 4.0, 6.0, 6.0), case.alpha_and_opacity)
                 .with_opacity(case.half_opacity),
-            PaintContributionItem::fill_rect(rect(36.0, 4.0, 6.0, 6.0), case.opaque_background),
-            PaintContributionItem::fill_rect(
+            solid_rect_fill(rect(36.0, 4.0, 6.0, 6.0), case.opaque_background),
+            solid_rect_fill(
                 rect(36.0, 4.0, 6.0, 6.0),
                 case.translucent_foreground,
             ),
-            PaintContributionItem::fill_rect(rect(44.0, 4.0, 6.0, 6.0), case.zero_background),
-            PaintContributionItem::fill_rect(rect(44.0, 4.0, 6.0, 6.0), case.zero_foreground)
+            solid_rect_fill(rect(44.0, 4.0, 6.0, 6.0), case.zero_background),
+            solid_rect_fill(rect(44.0, 4.0, 6.0, 6.0), case.zero_foreground)
                 .with_opacity(SceneOpacity::TRANSPARENT),
-            PaintContributionItem::fill_rect(rect(52.0, 4.0, 6.0, 6.0), case.opaque_regression),
+            solid_rect_fill(rect(52.0, 4.0, 6.0, 6.0), case.opaque_regression),
         ];
         (publication(items, 1.0), case)
     }
@@ -2230,12 +2246,12 @@ mod tests {
         let foreground = Color::rgba(0xD8, 0x8A, 0x3D, 0x90);
         let publication = publication(
             vec![
-                PaintContributionItem::fill_rect(
+                solid_rect_fill(
                     rect(8.0, 6.0, 20.0, 12.0),
                     Color::rgb(0xC3, 0x4A, 0x42),
                 ),
-                PaintContributionItem::fill_rect(rect(36.0, 6.0, 12.0, 12.0), background),
-                PaintContributionItem::fill_rect(rect(36.0, 6.0, 12.0, 12.0), foreground),
+                solid_rect_fill(rect(36.0, 6.0, 12.0, 12.0), background),
+                solid_rect_fill(rect(36.0, 6.0, 12.0, 12.0), foreground),
             ],
             1.0,
         );
@@ -2288,11 +2304,11 @@ mod tests {
             return Ok(());
         };
         let (first, successor, rebuilt) = publication_update_and_scale(
-            vec![PaintContributionItem::fill_rect(
+            vec![solid_rect_fill(
                 rect(4.0, 4.0, 12.0, 8.0),
                 Color::rgb(0x74, 0xB2, 0x5A),
             )],
-            vec![PaintContributionItem::fill_rect(
+            vec![solid_rect_fill(
                 rect(4.0, 4.0, 12.0, 8.0),
                 Color::rgb(0x58, 0x8C, 0xD1),
             )],
@@ -2355,7 +2371,7 @@ mod tests {
 
     #[test]
     fn partial_renderer_rejects_every_still_unsupported_scene_semantic() {
-        let stroke = PaintContributionItem::stroke_rect(
+        let stroke = solid_rect_stroke(
             rect(1.0, 1.0, 2.0, 2.0),
             Color::WHITE,
             LogicalLength::from(1_u16),
@@ -2371,17 +2387,18 @@ mod tests {
             Color::WHITE,
         )
         .unwrap_or_else(|_| unreachable!("fixture resource kind matches"));
-        let clipped = PaintContributionItem::fill_rect(rect(1.0, 1.0, 2.0, 2.0), Color::WHITE)
-            .with_clip(ContributionClip::new(
+        let clipped = solid_rect_fill(rect(1.0, 1.0, 2.0, 2.0), Color::WHITE).with_clip(
+            ContributionClip::new(
                 SceneShape::rounded_rect(rect(0.0, 0.0, 3.0, 3.0), Radius::ZERO),
                 LogicalTransform::IDENTITY,
-            ));
+            ),
+        );
         let cases = [
             (
                 stroke,
                 SceneValidationError::UnsupportedItem {
                     item_index: 0,
-                    semantic: UnsupportedSceneSemantic::StrokeRect,
+                    semantic: UnsupportedSceneSemantic::Stroke,
                 },
             ),
             (
@@ -2425,7 +2442,7 @@ mod tests {
         let transform = LogicalTransform::try_new(1.0, 0.25, 0.5, 1.0, 3.0, 4.0)?;
         let publication = publication(
             vec![
-                PaintContributionItem::fill_rect(rect(1.0, 1.0, 2.0, 2.0), color)
+                solid_rect_fill(rect(1.0, 1.0, 2.0, 2.0), color)
                     .with_transform(transform)
                     .with_opacity(opacity),
             ],
@@ -2446,7 +2463,7 @@ mod tests {
         let affine = LogicalTransform::try_new(1.0, 0.0, 0.5, 1.0, 10.0, 8.0)?;
         let publication = publication(
             vec![
-                PaintContributionItem::fill_rect(rect(0.0, 0.0, 10.0, 10.0), Color::WHITE)
+                solid_rect_fill(rect(0.0, 0.0, 10.0, 10.0), Color::WHITE)
                     .with_transform(affine),
             ],
             1.0,
@@ -2480,9 +2497,9 @@ mod tests {
         );
         let publication = publication(
             vec![
-                PaintContributionItem::fill_rect(rect(30.0, 10.0, 10.0, 10.0), Color::WHITE)
+                solid_rect_fill(rect(30.0, 10.0, 10.0, 10.0), Color::WHITE)
                     .with_transform(singular),
-                PaintContributionItem::fill_rect(rect(0.0, 0.0, 10.0, 10.0), Color::WHITE)
+                solid_rect_fill(rect(0.0, 0.0, 10.0, 10.0), Color::WHITE)
                     .with_transform(extreme),
             ],
             1.0,
@@ -2525,7 +2542,7 @@ mod tests {
     fn fractional_raster_scale_clips_to_exact_canvas_not_rounded_texture_extent()
     -> Result<(), Box<dyn Error>> {
         let publication = publication(
-            vec![PaintContributionItem::fill_rect(
+            vec![solid_rect_fill(
                 rect(60.0, 44.0, 10.0, 10.0),
                 Color::WHITE,
             )],
@@ -2576,9 +2593,9 @@ mod tests {
 
         let publication = publication(
             vec![
-                PaintContributionItem::fill_rect(rect(0.0, 0.0, 10.0, 10.0), affine_color)
+                solid_rect_fill(rect(0.0, 0.0, 10.0, 10.0), affine_color)
                     .with_transform(affine),
-                PaintContributionItem::fill_rect(rect(30.0, 10.0, 10.0, 10.0), singular_color)
+                solid_rect_fill(rect(30.0, 10.0, 10.0, 10.0), singular_color)
                     .with_transform(singular),
             ],
             1.0,
@@ -2633,8 +2650,7 @@ mod tests {
 
         let publication = publication(
             vec![
-                PaintContributionItem::fill_rect(rect(0.0, 0.0, 10.0, 10.0), color)
-                    .with_transform(transform),
+                solid_rect_fill(rect(0.0, 0.0, 10.0, 10.0), color).with_transform(transform),
             ],
             1.0,
         );
@@ -2660,8 +2676,8 @@ mod tests {
         let color_a = Color::rgb(0xC3, 0x4A, 0x42);
         let color_b = Color::rgb(0x37, 0x86, 0xC8);
         let logical_items = vec![
-            PaintContributionItem::fill_rect(rect(8.0, 6.0, 20.0, 12.0), color_a),
-            PaintContributionItem::fill_rect(rect(20.0, 12.0, 24.0, 18.0), color_b),
+            solid_rect_fill(rect(8.0, 6.0, 20.0, 12.0), color_a),
+            solid_rect_fill(rect(20.0, 12.0, 24.0, 18.0), color_b),
         ];
         let publication_1x = publication(logical_items.clone(), 1.0);
         let publication_2x = publication(logical_items, 2.0);
@@ -2671,8 +2687,11 @@ mod tests {
                 .items()
                 .iter()
                 .map(|item| match item.primitive() {
-                    PaintPrimitive::FillRect { rect, .. } => *rect,
-                    _ => unreachable!("the proof corpus contains only FillRects"),
+                    PaintPrimitive::Fill {
+                        shape: SceneShape::Rect(rect),
+                        brush: Brush::Solid(_),
+                    } => *rect,
+                    _ => unreachable!("the proof corpus contains only solid rectangle fills"),
                 })
                 .collect::<Vec<_>>()
         };
@@ -2817,11 +2836,10 @@ mod tests {
         let second_color = Color::rgba(0x37, 0x86, 0xC8, 0xB0);
         let first_opacity = scene_opacity(0.75);
         let second_opacity = scene_opacity(0.625);
-        let first_item = PaintContributionItem::fill_rect(rect(8.0, 18.0, 20.0, 14.0), first_color)
-            .with_opacity(first_opacity);
-        let second_item =
-            PaintContributionItem::fill_rect(rect(20.0, 24.0, 24.0, 16.0), second_color)
-                .with_opacity(second_opacity);
+        let first_item =
+            solid_rect_fill(rect(8.0, 18.0, 20.0, 14.0), first_color).with_opacity(first_opacity);
+        let second_item = solid_rect_fill(rect(20.0, 24.0, 24.0, 16.0), second_color)
+            .with_opacity(second_opacity);
         let first_then_second = publication(vec![first_item.clone(), second_item.clone()], 1.0);
         let second_then_first = publication(vec![second_item, first_item], 1.0);
         let forward = renderer.render_offscreen_publication(&first_then_second)?;
@@ -2876,7 +2894,7 @@ mod tests {
             return Ok(());
         };
         let accepted = publication(
-            vec![PaintContributionItem::fill_rect(
+            vec![solid_rect_fill(
                 rect(1.0, 1.0, 4.0, 4.0),
                 Color::WHITE,
             )],
@@ -2890,7 +2908,7 @@ mod tests {
         let retained_generation = first.target_generation();
 
         let rejected = publication(
-            vec![PaintContributionItem::stroke_rect(
+            vec![solid_rect_stroke(
                 rect(1.0, 1.0, 4.0, 4.0),
                 Color::WHITE,
                 LogicalLength::from(1_u16),
@@ -2908,7 +2926,7 @@ mod tests {
             OffscreenRenderError::UnsupportedScene {
                 item_index: Some(0),
                 detail,
-            } if detail.contains("StrokeRect")
+            } if detail.contains("Stroke")
         ));
         let observation = renderer
             .last_observation()
