@@ -2,6 +2,7 @@
 
 mod brush;
 mod image;
+mod outline;
 mod shadow;
 mod stroke;
 
@@ -14,5 +15,6 @@ pub use image::{
     ImageIntrinsicSize, ImageMapping, ImageMappingError, ImagePaintDescriptor, ImageSourceInsets,
     ImageSourceInsetsError,
 };
+pub use outline::Outline;
 pub use shadow::{DropShadow, NonFiniteVisualScalar};
 pub use stroke::{StrokeCap, StrokeJoin, StrokeStyle, StrokeStyleError};
