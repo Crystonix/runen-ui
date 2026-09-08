@@ -1034,6 +1034,7 @@ impl ResourceRenderer {
                 Err(shaped::ShapedRunResolveFailure::InvalidOutline { glyph_id }) => {
                     return Err(PublicationRenderError::ShapedTextOutlineInvalid {
                         item_index: item.shaped_run.item_index,
+                        glyph_id,
                     });
                 }
                 Err(shaped::ShapedRunResolveFailure::GlyphExtentExceedsDeviceLimit {
@@ -1493,14 +1494,11 @@ fn encode_resource_image_item(
         return;
     }
     let vertex_count = u32::try_from(vertex_bytes.len() / 20).unwrap_or(u32::MAX);
-    let vertex_buffer = device.create_buffer_init(&wgpu::util::DeviceExt::create_buffer_init(
-        device,
-        &wgpu::util::BufferInitDescriptor {
-            label: Some("runenui ordered mixed-scene image vertices"),
-            contents: &vertex_bytes,
-            usage: wgpu::BufferUsages::VERTEX,
-        },
-    ));
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("runenui ordered mixed-scene image vertices"),
+        contents: &vertex_bytes,
+        usage: wgpu::BufferUsages::VERTEX,
+    });
 
     if item.clips.is_empty() {
         image_renderer.draw(
