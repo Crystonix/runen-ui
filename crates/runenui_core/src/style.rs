@@ -3,6 +3,7 @@
 use crate::{
     Brush, IdentifierError, LogicalLength, Typography,
     identity::{IdentifierText, validate_identifier},
+    visual_style::{OpacityValue, OutlineValue, ShadowValue, VisualStyleProperties},
 };
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -516,6 +517,7 @@ pub struct StyleProperties {
     padding: Option<SpacingValue>,
     radius: Option<RadiusValue>,
     typography: Option<TypographyValue>,
+    visual: VisualStyleProperties,
 }
 
 impl StyleProperties {
@@ -525,6 +527,7 @@ impl StyleProperties {
         padding: None,
         radius: None,
         typography: None,
+        visual: VisualStyleProperties::EMPTY,
     };
 
     #[must_use]
@@ -534,6 +537,7 @@ impl StyleProperties {
             && self.padding.is_none()
             && self.radius.is_none()
             && self.typography.is_none()
+            && self.visual.is_empty()
     }
     #[must_use]
     pub fn with_foreground(mut self, value: impl Into<ColorValue>) -> Self {
@@ -561,6 +565,21 @@ impl StyleProperties {
         self
     }
     #[must_use]
+    pub fn with_outline(mut self, value: impl Into<OutlineValue>) -> Self {
+        self.visual = self.visual.with_outline(value);
+        self
+    }
+    #[must_use]
+    pub fn with_shadows(mut self, value: impl Into<ShadowValue>) -> Self {
+        self.visual = self.visual.with_shadows(value);
+        self
+    }
+    #[must_use]
+    pub fn with_opacity(mut self, value: impl Into<OpacityValue>) -> Self {
+        self.visual = self.visual.with_opacity(value);
+        self
+    }
+    #[must_use]
     pub const fn foreground(&self) -> Option<&ColorValue> {
         self.foreground.as_ref()
     }
@@ -579,6 +598,18 @@ impl StyleProperties {
     #[must_use]
     pub const fn typography(&self) -> Option<&TypographyValue> {
         self.typography.as_ref()
+    }
+    #[must_use]
+    pub const fn outline(&self) -> Option<&OutlineValue> {
+        self.visual.outline()
+    }
+    #[must_use]
+    pub const fn shadows(&self) -> Option<&ShadowValue> {
+        self.visual.shadows()
+    }
+    #[must_use]
+    pub const fn opacity(&self) -> Option<&OpacityValue> {
+        self.visual.opacity()
     }
 }
 
@@ -641,6 +672,21 @@ impl StyleIntent {
         self
     }
     #[must_use]
+    pub fn with_outline(mut self, value: impl Into<OutlineValue>) -> Self {
+        self.overrides = self.overrides.with_outline(value);
+        self
+    }
+    #[must_use]
+    pub fn with_shadows(mut self, value: impl Into<ShadowValue>) -> Self {
+        self.overrides = self.overrides.with_shadows(value);
+        self
+    }
+    #[must_use]
+    pub fn with_opacity(mut self, value: impl Into<OpacityValue>) -> Self {
+        self.overrides = self.overrides.with_opacity(value);
+        self
+    }
+    #[must_use]
     pub const fn recipe(&self) -> Option<&StyleRecipeId> {
         self.recipe.as_ref()
     }
@@ -671,5 +717,17 @@ impl StyleIntent {
     #[must_use]
     pub const fn typography(&self) -> Option<&TypographyValue> {
         self.overrides.typography()
+    }
+    #[must_use]
+    pub const fn outline(&self) -> Option<&OutlineValue> {
+        self.overrides.outline()
+    }
+    #[must_use]
+    pub const fn shadows(&self) -> Option<&ShadowValue> {
+        self.overrides.shadows()
+    }
+    #[must_use]
+    pub const fn opacity(&self) -> Option<&OpacityValue> {
+        self.overrides.opacity()
     }
 }
