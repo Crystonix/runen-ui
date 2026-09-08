@@ -3,9 +3,9 @@
 use std::{cell::Cell, rc::Rc};
 
 use runenui_core::{
-    Color, Element, LogicalLength, LogicalRect, NoHostProtocol, PaintContribution,
-    PaintContributionContext, PaintContributionItem, PaintPrimitive, StyleEnvironment, UiApp, View,
-    Widget, WidgetMeasure,
+    Brush, Color, Element, LogicalLength, LogicalRect, NoHostProtocol, PaintContribution,
+    PaintContributionContext, PaintContributionItem, PaintPrimitive, SceneShape, StyleEnvironment,
+    UiApp, View, Widget, WidgetMeasure,
 };
 use runenui_runtime::{
     AppRuntime, LayoutConstraints, PumpBudget, SurfaceBuildContext, SurfacePhase,
@@ -53,7 +53,10 @@ impl Widget<Action> for PaintProbe {
             LogicalRect::try_new(0.0, 0.0, size.width(), size.height()).unwrap_or_else(|_| {
                 unreachable!("validated local size yields a valid paint rectangle")
             });
-        PaintContribution::single(PaintContributionItem::fill_rect(rect, color))
+        PaintContribution::single(PaintContributionItem::fill(
+            SceneShape::rect(rect),
+            Brush::solid(color),
+        ))
     }
 }
 
@@ -96,8 +99,11 @@ fn scene_color(publication: &SurfacePublication) -> Color {
         .first()
         .unwrap_or_else(|| unreachable!("paint probe contributes one item"));
     match item.primitive() {
-        PaintPrimitive::FillRect { color, .. } => *color,
-        _ => unreachable!("paint probe contributes a fill rectangle"),
+        PaintPrimitive::Fill {
+            shape: SceneShape::Rect(_),
+            brush: Brush::Solid(color),
+        } => *color,
+        _ => unreachable!("paint probe contributes a solid rectangle fill"),
     }
 }
 
