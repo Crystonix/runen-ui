@@ -46,18 +46,12 @@ impl Widget<()> for SceneOwner {
             .unwrap_or_else(|_| unreachable!("fixture transform is valid"));
 
         PaintContribution::new(vec![
-            fill_rect(
-                rect(0.0, 0.0, 30.0, 30.0),
-                Color::rgba(255, 0, 0, 255),
-            )
-            .with_layer(SceneLayer::new(-1)),
-            fill_rect(
-                rect(0.0, 0.0, 10.0, 10.0),
-                Color::rgba(0, 0, 255, 255),
-            )
-            .with_transform(translated)
-            .with_clip(rounded_clip)
-            .with_opacity(half),
+            fill_rect(rect(0.0, 0.0, 30.0, 30.0), Color::rgba(255, 0, 0, 255))
+                .with_layer(SceneLayer::new(-1)),
+            fill_rect(rect(0.0, 0.0, 10.0, 10.0), Color::rgba(0, 0, 255, 255))
+                .with_transform(translated)
+                .with_clip(rounded_clip)
+                .with_opacity(half),
             stroke_rect(
                 rect(2.0, 2.0, 12.0, 12.0),
                 Color::rgba(0, 255, 0, 128),
