@@ -1035,7 +1035,7 @@ mod tests {
             .unwrap_or_else(|_| unreachable!("fixture rectangle is valid"))
     }
 
-    fn fill_rect(rect: LogicalRect, color: Color) -> PaintContributionItem {
+    const fn fill_rect(rect: LogicalRect, color: Color) -> PaintContributionItem {
         PaintContributionItem::fill(SceneShape::rect(rect), Brush::solid(color))
     }
 
