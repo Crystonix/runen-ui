@@ -1,8 +1,8 @@
 //! Pure layered style-resolution helpers.
 
 use crate::{
-    Brush, BrushToken, BrushValue, Color, ColorToken, ColorValue, ComputedStyle, EdgeInsets, Radius,
-    RadiusToken, RadiusValue, SpacingToken, SpacingValue, StyleEnvironment, StyleIntent,
+    Brush, BrushToken, BrushValue, Color, ColorToken, ColorValue, ComputedStyle, EdgeInsets,
+    Radius, RadiusToken, RadiusValue, SpacingToken, SpacingValue, StyleEnvironment, StyleIntent,
     StyleInteractionFacts, StyleInteractionState, StylePreferenceKind, StyleProperties,
     StyleRecipeId, StyleTokens, StyleVariantId, Typography, TypographyToken, TypographyValue,
 };
