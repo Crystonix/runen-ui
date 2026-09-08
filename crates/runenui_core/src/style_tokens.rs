@@ -4,22 +4,23 @@ use core::{error::Error, fmt};
 use std::collections::{BTreeMap, btree_map::Entry};
 
 use crate::{
-    Brush, BrushToken, Color, ColorToken, EdgeInsets, Radius, RadiusToken, SpacingToken, TokenId,
-    Typography, TypographyToken,
+    Brush, BrushToken, Color, ColorToken, DropShadow, EdgeInsets, OpacityToken, Outline,
+    OutlineToken, Radius, RadiusToken, SceneOpacity, ShadowToken, SpacingToken, TokenId, Typography,
+    TypographyToken,
 };
 
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Current style-token family.
-///
-/// This enum is non-exhaustive because later style milestones may add families
-/// such as borders, shadows, or opacity.
 pub enum TokenFamily {
     Color,
     Brush,
     Spacing,
     Radius,
     Typography,
+    Outline,
+    Shadow,
+    Opacity,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -59,6 +60,9 @@ pub struct StyleTokens {
     spacing: BTreeMap<SpacingToken, EdgeInsets>,
     radii: BTreeMap<RadiusToken, Radius>,
     typography: BTreeMap<TypographyToken, Typography>,
+    outlines: BTreeMap<OutlineToken, Outline>,
+    shadows: BTreeMap<ShadowToken, Vec<DropShadow>>,
+    opacities: BTreeMap<OpacityToken, SceneOpacity>,
     revision: u64,
 }
 
@@ -69,6 +73,9 @@ impl PartialEq for StyleTokens {
             && self.spacing == other.spacing
             && self.radii == other.radii
             && self.typography == other.typography
+            && self.outlines == other.outlines
+            && self.shadows == other.shadows
+            && self.opacities == other.opacities
     }
 }
 
@@ -183,6 +190,69 @@ impl StyleTokens {
         Ok(())
     }
 
+    /// Defines a node-outline token without replacement.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DuplicateTokenDefinition`] if the outline token already exists.
+    pub fn define_outline(
+        &mut self,
+        token: OutlineToken,
+        value: Outline,
+    ) -> Result<(), DuplicateTokenDefinition> {
+        define(
+            &mut self.outlines,
+            token,
+            value,
+            TokenFamily::Outline,
+            OutlineToken::id,
+        )?;
+        self.advance_revision();
+        Ok(())
+    }
+
+    /// Defines one complete ordered node-shadow-list token without replacement.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DuplicateTokenDefinition`] if the shadow token already exists.
+    pub fn define_shadows(
+        &mut self,
+        token: ShadowToken,
+        value: Vec<DropShadow>,
+    ) -> Result<(), DuplicateTokenDefinition> {
+        define(
+            &mut self.shadows,
+            token,
+            value,
+            TokenFamily::Shadow,
+            ShadowToken::id,
+        )?;
+        self.advance_revision();
+        Ok(())
+    }
+
+    /// Defines a node-opacity token without replacement.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DuplicateTokenDefinition`] if the opacity token already exists.
+    pub fn define_opacity(
+        &mut self,
+        token: OpacityToken,
+        value: SceneOpacity,
+    ) -> Result<(), DuplicateTokenDefinition> {
+        define(
+            &mut self.opacities,
+            token,
+            value,
+            TokenFamily::Opacity,
+            OpacityToken::id,
+        )?;
+        self.advance_revision();
+        Ok(())
+    }
+
     #[must_use]
     pub fn color(&self, token: &ColorToken) -> Option<Color> {
         self.colors.get(token).copied()
@@ -204,12 +274,27 @@ impl StyleTokens {
         self.typography.get(token)
     }
     #[must_use]
+    pub fn outline(&self, token: &OutlineToken) -> Option<&Outline> {
+        self.outlines.get(token)
+    }
+    #[must_use]
+    pub fn shadows(&self, token: &ShadowToken) -> Option<&[DropShadow]> {
+        self.shadows.get(token).map(Vec::as_slice)
+    }
+    #[must_use]
+    pub fn opacity(&self, token: &OpacityToken) -> Option<SceneOpacity> {
+        self.opacities.get(token).copied()
+    }
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.colors.is_empty()
             && self.brushes.is_empty()
             && self.spacing.is_empty()
             && self.radii.is_empty()
             && self.typography.is_empty()
+            && self.outlines.is_empty()
+            && self.shadows.is_empty()
+            && self.opacities.is_empty()
     }
 
     /// Monotonic diagnostic revision for callers that want a cheap change hint.
