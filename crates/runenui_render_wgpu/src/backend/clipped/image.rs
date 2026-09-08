@@ -471,10 +471,10 @@ fn append_patch_vertices(
             let surface_y = point[1] / scale;
             let local_x = m11.mul_add(surface_x, m21.mul_add(surface_y, tx));
             let local_y = m12.mul_add(surface_x, m22.mul_add(surface_y, ty));
-            let source_u = source_x
-                + ((local_x - destination_x) / destination_width) * source_width;
-            let source_v = source_y
-                + ((local_y - destination_y) / destination_height) * source_height;
+            let source_u =
+                source_x + ((local_x - destination_x) / destination_width) * source_width;
+            let source_v =
+                source_y + ((local_y - destination_y) / destination_height) * source_height;
             let uv = [
                 narrow_uv(source_u / intrinsic_width),
                 narrow_uv(source_v / intrinsic_height),
@@ -638,8 +638,8 @@ mod tests {
     }
 
     #[test]
-    fn resolved_source_subrect_maps_directly_to_uv_domain()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn resolved_source_subrect_maps_directly_to_uv_domain() -> Result<(), Box<dyn std::error::Error>>
+    {
         let image = image(
             [5.0, 2.5, 10.0, 5.0],
             rect(0.0, 0.0, 20.0, 10.0),
@@ -675,11 +675,7 @@ mod tests {
     #[test]
     fn singular_image_transform_produces_no_vertices() -> Result<(), Box<dyn std::error::Error>> {
         let singular = LogicalTransform::try_new(1.0, 0.0, 0.0, 0.0, 2.0, 1.0)?;
-        let image = image(
-            [0.0, 0.0, 20.0, 10.0],
-            rect(2.0, 3.0, 20.0, 10.0),
-            singular,
-        );
+        let image = image([0.0, 0.0, 20.0, 10.0], rect(2.0, 3.0, 20.0, 10.0), singular);
         let extent = super::super::super::OffscreenExtent::new(64, 48)?;
         let canvas = super::super::super::RasterCanvasExtent::new(64.0, 48.0);
         assert!(vertex_bytes(&image, extent, canvas, RasterScale::ONE).is_empty());
