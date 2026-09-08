@@ -346,9 +346,9 @@ pub use semantic::{
 };
 pub use semantic_action::{SemanticActionRequest, SemanticActionTarget};
 pub use style::{
-    BrushToken, BrushValue, Color, ColorToken, ColorValue, EdgeInsets, Radius, RadiusToken,
-    RadiusValue, SpacingToken, SpacingValue, StyleIntent, StyleProperties, StyleRecipeId,
-    StyleVariantId, TokenId, TypographyToken, TypographyValue,
+    BrushToken, BrushValue, Color, ColorToken, ColorValue, EdgeInsets, OpacityToken, OutlineToken,
+    Radius, RadiusToken, RadiusValue, ShadowToken, SpacingToken, SpacingValue, StyleIntent,
+    StyleProperties, StyleRecipeId, StyleVariantId, TokenId, TypographyToken, TypographyValue,
 };
 pub use style_effects::{StyleEffects, StyleProperty, style_effects_between};
 pub use style_environment::{
@@ -378,9 +378,7 @@ pub use visual::{
     ImageSourceInsetsError, LinearGradient, NonFiniteVisualScalar, Outline, RadialGradient,
     StrokeCap, StrokeJoin, StrokeStyle, StrokeStyleError, UnitInterval, UnitIntervalError,
 };
-pub use visual_style::{
-    OpacityToken, OpacityValue, OutlineToken, OutlineValue, ShadowToken, ShadowValue,
-};
+pub use visual_style::{OpacityValue, OutlineValue, ShadowValue};
 pub use widget_context::{
     WidgetActivationContext, WidgetInvalidation, WidgetMountContext, WidgetUnmountContext,
     WidgetUnmountReason, WidgetUpdateContext,
