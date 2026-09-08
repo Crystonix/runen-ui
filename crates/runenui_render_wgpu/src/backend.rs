@@ -2371,10 +2371,18 @@ mod tests {
             LogicalLength::from(1_u16),
         );
         let image = PaintContributionItem::image(
-            ResourceRef::new(ResourceKind::Image),
-            rect(1.0, 1.0, 2.0, 2.0),
-        )
-        .unwrap_or_else(|_| unreachable!("fixture resource kind matches"));
+            runenui_core::ImagePaintDescriptor::new(
+                runenui_core::ImageDescriptor::new(
+                    ResourceRef::new(ResourceKind::Image),
+                    runenui_core::ImageIntrinsicSize::new(1, 1)
+                        .unwrap_or_else(|| unreachable!("fixture image extent is non-zero")),
+                )
+                .unwrap_or_else(|_| unreachable!("fixture resource kind matches")),
+                rect(1.0, 1.0, 2.0, 2.0),
+                runenui_core::ImageMapping::default(),
+            )
+            .unwrap_or_else(|_| unreachable!("fixture image mapping is valid")),
+        );
         let shaped_text = PaintContributionItem::shaped_text_run(
             ResourceRef::new(ResourceKind::ShapedTextRun),
             LogicalPoint::new(1.0, 1.0).unwrap_or_else(|_| unreachable!("fixture point is finite")),
