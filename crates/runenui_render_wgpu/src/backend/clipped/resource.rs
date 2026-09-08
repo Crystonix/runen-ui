@@ -9,9 +9,7 @@ use crate::{
     WgpuHasDisplayHandle,
     lineage::PublicationLineage,
     observation::{ResourceCacheOutcome, ResourceObservation, ResourceRealizationKind},
-    scene_subset::{
-        SceneValidationError, UnsupportedSceneSemantic, validate_literal_rect_item,
-    },
+    scene_subset::{SceneValidationError, UnsupportedSceneSemantic, validate_literal_rect_item},
 };
 
 use super::super::{
@@ -943,18 +941,16 @@ impl ResourceRenderer {
                     .map_err(|failure| image_failure(item.image.item_index, failure))?;
                 continue;
             }
-            if let Some(pending) = resolved
-                .iter()
-                .find(|resolved: &&image::ResolvedImage| {
-                    resolved.resource() == &item.image.resource
-                })
-            {
+            if let Some(pending) = resolved.iter().find(|resolved: &&image::ResolvedImage| {
+                resolved.resource() == &item.image.resource
+            }) {
                 image::extent_matches(item.image.intrinsic_size, pending.extent())
                     .map_err(|failure| image_failure(item.image.item_index, failure))?;
                 continue;
             }
-            let resolved_image = image::resolve_image(provider, &item.image, max_texture_dimension_2d)
-                .map_err(|failure| image_failure(item.image.item_index, failure))?;
+            let resolved_image =
+                image::resolve_image(provider, &item.image, max_texture_dimension_2d)
+                    .map_err(|failure| image_failure(item.image.item_index, failure))?;
             resolved.push(resolved_image);
         }
         Ok(resolved)
@@ -1140,12 +1136,13 @@ fn validate_resource_scene_subset(
 ) -> Result<Vec<ResourceSceneItem>, SceneValidationError> {
     let requirements = publication.scene().requirements();
     let capabilities = SceneCapabilities::new([ResourceKind::Image, ResourceKind::ShapedTextRun]);
-    let unsupported_resource_kind = capabilities
-        .check_requirements(&requirements)
-        .err()
-        .map(|error| SceneValidationError::UnsupportedResourceKind {
-            resource_kind: error.resource_kind(),
-        });
+    let unsupported_resource_kind =
+        capabilities
+            .check_requirements(&requirements)
+            .err()
+            .map(|error| SceneValidationError::UnsupportedResourceKind {
+                resource_kind: error.resource_kind(),
+            });
     let mut items = Vec::with_capacity(publication.scene().items().len());
     for (item_index, item) in publication.scene().items().iter().enumerate() {
         if let PaintPrimitive::Image(image_primitive) = item.primitive() {
