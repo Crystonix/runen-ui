@@ -17,12 +17,12 @@ mod tests {
     };
 
     use runenui_core::{
-        Color, Element, IntoEffects, LogicalLength, LogicalRect, LogicalSize, NoHostProtocol,
-        PaintContribution, PaintContributionContext, PaintContributionItem, ResourceKind,
-        ResourceRef, SemanticAction, SemanticActionRequest, SemanticContribution,
-        SemanticContributionContext, SemanticNodeContribution, SemanticRole, StyleEnvironment,
-        UiApp, View, Widget, WidgetActivation, WidgetActivationContext, WidgetActivationOutput,
-        WidgetMeasure,
+        Brush, Color, Element, IntoEffects, LogicalLength, LogicalRect, LogicalSize,
+        NoHostProtocol, PaintContribution, PaintContributionContext, PaintContributionItem,
+        ResourceKind, ResourceRef, SceneShape, SemanticAction, SemanticActionRequest,
+        SemanticContribution, SemanticContributionContext, SemanticNodeContribution, SemanticRole,
+        StyleEnvironment, UiApp, View, Widget, WidgetActivation, WidgetActivationContext,
+        WidgetActivationOutput, WidgetMeasure,
     };
     use runenui_render_wgpu::{
         BackendSelection, ImagePayload, OffscreenPublicationReadback, OffscreenReadback,
@@ -97,14 +97,14 @@ mod tests {
             )
             .unwrap_or_else(|_| unreachable!("fixture image reference has image kind"));
             PaintContribution::new(vec![
-                PaintContributionItem::fill_rect(
-                    rect(
+                PaintContributionItem::fill(
+                    SceneShape::rect(rect(
                         0.0,
                         0.0,
                         f32::from(SURFACE_EXTENT),
                         f32::from(SURFACE_EXTENT),
-                    ),
-                    background,
+                    )),
+                    Brush::solid(background),
                 ),
                 image,
             ])
