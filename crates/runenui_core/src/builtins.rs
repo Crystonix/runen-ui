@@ -1,13 +1,13 @@
 use core::fmt;
 
 use crate::{
-    Brush, ColorValue, ElementId, ElementKey, FlexContainerStyle, FlexDirection, HitContribution,
-    HitContributionContext, IntoElementId, IntoElementKey, LayoutContainer, LayoutStyle,
-    LogicalLength, LogicalRect, LogicalSize, PaintContribution, PaintContributionContext,
-    PaintContributionItem, RadiusValue, SceneShape, SemanticAction, SemanticContribution,
-    SemanticContributionContext, SemanticNodeContribution, SemanticRole, SemanticState,
-    SemanticText, SpacingValue, StyleIntent, StyleRecipeId, StyleVariantId, TypographyValue,
-    WidgetActivationContext, WidgetInvalidation, WidgetUpdateContext,
+    BrushValue, ColorValue, ElementId, ElementKey, FlexContainerStyle, FlexDirection,
+    HitContribution, HitContributionContext, IntoElementId, IntoElementKey, LayoutContainer,
+    LayoutStyle, LogicalLength, LogicalRect, LogicalSize, PaintContribution,
+    PaintContributionContext, PaintContributionItem, RadiusValue, SceneShape, SemanticAction,
+    SemanticContribution, SemanticContributionContext, SemanticNodeContribution, SemanticRole,
+    SemanticState, SemanticText, SpacingValue, StyleIntent, StyleRecipeId, StyleVariantId,
+    TypographyValue, WidgetActivationContext, WidgetInvalidation, WidgetUpdateContext,
     element::{
         AuthoredElementFields, AuthoringDiagnostic, ChildBearingWidget, Element, View, Views,
         Widget, WidgetActivation, WidgetActivationOutput, WidgetMeasure, WidgetMeasureInput,
@@ -48,7 +48,7 @@ macro_rules! common_builder_methods {
             self
         }
         #[must_use]
-        pub fn background(mut self, value: impl Into<ColorValue>) -> Self {
+        pub fn background(mut self, value: impl Into<BrushValue>) -> Self {
             self.style = self.style.with_background(value);
             self
         }
@@ -489,10 +489,10 @@ fn background_paint(context: &PaintContributionContext) -> PaintContribution {
     context
         .computed_style()
         .background()
-        .map_or_else(PaintContribution::empty, |color| {
+        .map_or_else(PaintContribution::empty, |brush| {
             PaintContribution::single(PaintContributionItem::fill(
                 SceneShape::rect(local_rect(context.local_size())),
-                Brush::solid(color),
+                brush.clone(),
             ))
         })
 }
