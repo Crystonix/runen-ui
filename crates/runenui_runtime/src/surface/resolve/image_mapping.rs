@@ -69,8 +69,10 @@ fn resolve_image(descriptor: &ImagePaintDescriptor) -> ImagePrimitive {
 }
 
 #[allow(
+    clippy::similar_names,
+    clippy::suboptimal_flops,
     clippy::too_many_arguments,
-    reason = "the pure image mapping helper keeps every authored source/alignment/fit input explicit"
+    reason = "axis-paired coordinate names express the accepted image mapping contract, and preserving explicit multiply-then-add order avoids changing framework-owned floating-point results"
 )]
 fn resolve_fit(
     intrinsic_width: u32,
@@ -164,8 +166,9 @@ fn resolve_fit(
 }
 
 #[allow(
+    clippy::similar_names,
     clippy::too_many_arguments,
-    reason = "the pure nine-slice helper keeps the exact authored source and destination edge facts explicit"
+    reason = "axis-paired source and destination edge names keep the accepted nine-slice mapping explicit"
 )]
 fn resolve_nine_slice(
     intrinsic_width: u32,
@@ -335,6 +338,10 @@ mod tests {
         image
     }
 
+    fn assert_source_eq(actual: [f64; 4], expected: [f64; 4]) {
+        assert_eq!(actual.map(f64::to_bits), expected.map(f64::to_bits));
+    }
+
     #[test]
     fn contain_and_cover_resolve_before_publication() {
         let contain = resolved(&image(
@@ -349,7 +356,7 @@ mod tests {
         let (source, destination) = contain
             .resolved_patch(0)
             .unwrap_or_else(|| unreachable!("contain has one patch"));
-        assert_eq!(source, [0.0, 0.0, 100.0, 50.0]);
+        assert_source_eq(source, [0.0, 0.0, 100.0, 50.0]);
         assert_eq!(destination, rect(0.0, 25.0, 100.0, 50.0));
 
         let cover = resolved(&image(
@@ -363,7 +370,7 @@ mod tests {
         let (source, destination) = cover
             .resolved_patch(0)
             .unwrap_or_else(|| unreachable!("cover has one patch"));
-        assert_eq!(source, [25.0, 0.0, 50.0, 50.0]);
+        assert_source_eq(source, [25.0, 0.0, 50.0, 50.0]);
         assert_eq!(destination, rect(0.0, 0.0, 100.0, 100.0));
     }
 
@@ -382,7 +389,7 @@ mod tests {
         let (source, destination) = none
             .resolved_patch(0)
             .unwrap_or_else(|| unreachable!("none has visible patch"));
-        assert_eq!(source, [0.0, 20.0, 60.0, 30.0]);
+        assert_source_eq(source, [0.0, 20.0, 60.0, 30.0]);
         assert_eq!(destination, rect(10.0, 20.0, 60.0, 30.0));
 
         let scale_down = resolved(&image(
@@ -472,7 +479,7 @@ mod tests {
             ImageFit::Fill,
             rect(0.0, 0.0, 1.0, 1.0),
         );
-        assert_eq!(patches[0].0, [0.0, 0.0, 16_777_217.0, 1.0]);
+        assert_source_eq(patches[0].0, [0.0, 0.0, 16_777_217.0, 1.0]);
     }
 
     #[test]
@@ -490,8 +497,8 @@ mod tests {
             unreachable!("finite logical origin and extent remain representable")
         });
         assert!(resolved.x().is_finite());
-        assert_eq!(resolved.width(), f32::MAX);
-        assert_eq!(resolved.height(), 1.0);
+        assert_eq!(resolved.width().to_bits(), f32::MAX.to_bits());
+        assert_eq!(resolved.height().to_bits(), 1.0_f32.to_bits());
     }
 
     #[test]
