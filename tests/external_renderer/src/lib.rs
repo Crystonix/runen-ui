@@ -71,17 +71,21 @@ impl PaintRecord {
         self.layer
     }
 
-    /// Maps one normalized image-domain point into surface-logical coordinates.
+    /// Maps one normalized point across a single resolved image destination patch.
     ///
-    /// The complete closed normalized coordinate square is accepted so callers can
-    /// inspect exact destination edges even though rectangle coverage itself is half-open.
+    /// This helper intentionally applies only to a publication image with exactly
+    /// one runtime-resolved patch. Multi-patch images such as nine-slice require a
+    /// patch-explicit consumer rather than reconstructing authored mapping policy.
     #[must_use]
     pub fn image_surface_point(&self, normalized: LogicalPoint) -> Option<LogicalPoint> {
         if !(0.0..=1.0).contains(&normalized.x()) || !(0.0..=1.0).contains(&normalized.y()) {
             return None;
         }
         let image = self.primitive.as_image()?;
-        let destination = image.destination();
+        if image.resolved_patch_count()? != 1 {
+            return None;
+        }
+        let (_, destination) = image.resolved_patch(0)?;
         let local = LogicalPoint::new(
             destination.width().mul_add(normalized.x(), destination.x()),
             destination
