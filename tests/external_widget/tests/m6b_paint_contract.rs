@@ -108,7 +108,7 @@ fn primitive_covers(primitive: &PaintPrimitive, sample: LogicalPoint) -> bool {
     }
 }
 
-fn solid_color(primitive: &PaintPrimitive) -> Option<Color> {
+const fn solid_color(primitive: &PaintPrimitive) -> Option<Color> {
     match primitive {
         PaintPrimitive::Fill {
             brush: Brush::Solid(color),
