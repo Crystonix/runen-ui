@@ -9,9 +9,9 @@ use std::{
 };
 
 use runenui_core::{
-    Color, Element, LogicalLength, LogicalRect, LogicalSize, NoHostProtocol, PaintContribution,
-    PaintContributionContext, PaintContributionItem, ResourceKind, ResourceRef, StyleEnvironment,
-    UiApp, Widget, WidgetMeasure, WidgetUpdateContext,
+    Brush, Color, Element, LogicalLength, LogicalRect, LogicalSize, NoHostProtocol,
+    PaintContribution, PaintContributionContext, PaintContributionItem, ResourceKind, ResourceRef,
+    SceneShape, StyleEnvironment, UiApp, Widget, WidgetMeasure, WidgetUpdateContext,
 };
 use runenui_render_wgpu::{
     BackendSelection, ImagePayload, PublicationRenderError, PublicationUpdateMode, Renderer,
@@ -79,6 +79,10 @@ impl UiApp for FixtureApp {
 fn rect(x: f32, y: f32, width: f32, height: f32) -> LogicalRect {
     LogicalRect::try_new(x, y, width, height)
         .unwrap_or_else(|_| unreachable!("fixture rectangle is valid"))
+}
+
+fn fill_rect(rect: LogicalRect, color: Color) -> PaintContributionItem {
+    PaintContributionItem::fill(SceneShape::rect(rect), Brush::solid(color))
 }
 
 fn publication(items: Vec<PaintContributionItem>) -> PaintPublication {
@@ -221,7 +225,7 @@ fn resource_cache_loss_forces_full_resync_and_reloads_before_repaint() -> Result
     );
     assert_eq!(provider.loads(), 3);
 
-    let literal = publication(vec![PaintContributionItem::fill_rect(
+    let literal = publication(vec![fill_rect(
         rect(
             0.0,
             0.0,
