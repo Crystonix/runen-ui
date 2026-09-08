@@ -45,9 +45,8 @@ impl Widget<()> for RequirementsOwner {
                 runenui_core::ImagePaintDescriptor::new(
                     runenui_core::ImageDescriptor::new(
                         self.image.clone(),
-                        runenui_core::ImageIntrinsicSize::new(1, 1).unwrap_or_else(|| {
-                            unreachable!("fixture image extent is non-zero")
-                        }),
+                        runenui_core::ImageIntrinsicSize::new(1, 1)
+                            .unwrap_or_else(|| unreachable!("fixture image extent is non-zero")),
                     )
                     .unwrap_or_else(|_| unreachable!("fixture image ref has image kind")),
                     rect(),
