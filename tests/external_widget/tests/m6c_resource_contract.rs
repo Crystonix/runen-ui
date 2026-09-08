@@ -33,8 +33,7 @@ fn rect() -> LogicalRect {
 }
 
 fn intrinsic() -> ImageIntrinsicSize {
-    ImageIntrinsicSize::new(40, 50)
-        .unwrap_or_else(|| unreachable!("test image extent is non-zero"))
+    ImageIntrinsicSize::new(40, 50).unwrap_or_else(|| unreachable!("test image extent is non-zero"))
 }
 
 fn image_item(resource: ResourceRef) -> PaintContributionItem {
@@ -164,7 +163,10 @@ fn opaque_refs_disambiguate_providers_and_resource_primitives_preserve_exact_log
     assert!(image.authored_descriptor().is_none());
     assert_eq!(image.resolved_intrinsic_size(), Some(intrinsic()));
     assert_eq!(image.resolved_patch_count(), Some(1));
-    assert_eq!(image.resolved_patch(0), Some(([0.0, 0.0, 40.0, 50.0], rect())));
+    assert_eq!(
+        image.resolved_patch(0),
+        Some(([0.0, 0.0, 40.0, 50.0], rect()))
+    );
 
     let mut realization_cache = HashMap::new();
     realization_cache.insert(image_a.clone(), "first-realization");
