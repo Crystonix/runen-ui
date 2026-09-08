@@ -1,10 +1,10 @@
 //! Pure layered style-resolution helpers.
 
 use crate::{
-    Color, ColorToken, ColorValue, ComputedStyle, EdgeInsets, Radius, RadiusToken, RadiusValue,
-    SpacingToken, SpacingValue, StyleEnvironment, StyleIntent, StyleInteractionFacts,
-    StyleInteractionState, StylePreferenceKind, StyleProperties, StyleRecipeId, StyleTokens,
-    StyleVariantId, Typography, TypographyToken, TypographyValue,
+    Brush, BrushToken, BrushValue, Color, ColorToken, ColorValue, ComputedStyle, EdgeInsets, Radius,
+    RadiusToken, RadiusValue, SpacingToken, SpacingValue, StyleEnvironment, StyleIntent,
+    StyleInteractionFacts, StyleInteractionState, StylePreferenceKind, StyleProperties,
+    StyleRecipeId, StyleTokens, StyleVariantId, Typography, TypographyToken, TypographyValue,
 };
 
 /// Exact precedence layer that last attempted to define one property.
@@ -37,7 +37,7 @@ pub enum StyleFieldProvenance<Token> {
 pub struct StyleProvenance {
     foreground: StyleFieldProvenance<ColorToken>,
     foreground_layer: Option<StyleResolutionLayer>,
-    background: StyleFieldProvenance<ColorToken>,
+    background: StyleFieldProvenance<BrushToken>,
     background_layer: Option<StyleResolutionLayer>,
     padding: StyleFieldProvenance<SpacingToken>,
     padding_layer: Option<StyleResolutionLayer>,
@@ -68,7 +68,7 @@ impl StyleProvenance {
     #[must_use]
     pub const fn new(
         foreground: StyleFieldProvenance<ColorToken>,
-        background: StyleFieldProvenance<ColorToken>,
+        background: StyleFieldProvenance<BrushToken>,
         padding: StyleFieldProvenance<SpacingToken>,
         radius: StyleFieldProvenance<RadiusToken>,
     ) -> Self {
@@ -102,7 +102,7 @@ impl StyleProvenance {
         self.foreground_layer.as_ref()
     }
     #[must_use]
-    pub const fn background(&self) -> &StyleFieldProvenance<ColorToken> {
+    pub const fn background(&self) -> &StyleFieldProvenance<BrushToken> {
         &self.background
     }
     #[must_use]
@@ -139,7 +139,7 @@ impl StyleProvenance {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UnresolvedStyleToken {
     Foreground(ColorToken),
-    Background(ColorToken),
+    Background(BrushToken),
     Padding(SpacingToken),
     Radius(RadiusToken),
     Typography(TypographyToken),
@@ -201,7 +201,7 @@ impl StyleResolution {
 #[derive(Default)]
 struct ResolutionBuilder {
     foreground: Option<Color>,
-    background: Option<Color>,
+    background: Option<Brush>,
     padding: Option<EdgeInsets>,
     radius: Option<Radius>,
     typography: Option<Typography>,
@@ -273,19 +273,19 @@ impl ResolutionBuilder {
 
     fn apply_background(
         &mut self,
-        value: &ColorValue,
+        value: &BrushValue,
         layer: StyleResolutionLayer,
         tokens: &StyleTokens,
     ) {
         self.provenance.background_layer = Some(layer);
         match value {
-            ColorValue::Literal(value) => {
-                self.background = Some(*value);
+            BrushValue::Literal(value) => {
+                self.background = Some(value.clone());
                 self.provenance.background = StyleFieldProvenance::Literal;
             }
-            ColorValue::Token(token) => {
-                if let Some(value) = tokens.color(token) {
-                    self.background = Some(value);
+            BrushValue::Token(token) => {
+                if let Some(value) = tokens.brush(token) {
+                    self.background = Some(value.clone());
                     self.provenance.background = StyleFieldProvenance::ResolvedToken(token.clone());
                 } else {
                     self.background = None;
