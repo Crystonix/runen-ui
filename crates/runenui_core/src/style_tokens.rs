@@ -4,8 +4,8 @@ use core::{error::Error, fmt};
 use std::collections::{BTreeMap, btree_map::Entry};
 
 use crate::{
-    Color, ColorToken, EdgeInsets, Radius, RadiusToken, SpacingToken, TokenId, Typography,
-    TypographyToken,
+    Brush, BrushToken, Color, ColorToken, EdgeInsets, Radius, RadiusToken, SpacingToken, TokenId,
+    Typography, TypographyToken,
 };
 
 #[non_exhaustive]
@@ -16,6 +16,7 @@ use crate::{
 /// such as borders, shadows, or opacity.
 pub enum TokenFamily {
     Color,
+    Brush,
     Spacing,
     Radius,
     Typography,
@@ -54,6 +55,7 @@ impl Error for DuplicateTokenDefinition {}
 #[derive(Clone, Debug, Default)]
 pub struct StyleTokens {
     colors: BTreeMap<ColorToken, Color>,
+    brushes: BTreeMap<BrushToken, Brush>,
     spacing: BTreeMap<SpacingToken, EdgeInsets>,
     radii: BTreeMap<RadiusToken, Radius>,
     typography: BTreeMap<TypographyToken, Typography>,
@@ -63,6 +65,7 @@ pub struct StyleTokens {
 impl PartialEq for StyleTokens {
     fn eq(&self, other: &Self) -> bool {
         self.colors == other.colors
+            && self.brushes == other.brushes
             && self.spacing == other.spacing
             && self.radii == other.radii
             && self.typography == other.typography
@@ -91,6 +94,27 @@ impl StyleTokens {
             value,
             TokenFamily::Color,
             ColorToken::id,
+        )?;
+        self.advance_revision();
+        Ok(())
+    }
+
+    /// Defines a brush token without replacement.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DuplicateTokenDefinition`] if the brush token already exists.
+    pub fn define_brush(
+        &mut self,
+        token: BrushToken,
+        value: Brush,
+    ) -> Result<(), DuplicateTokenDefinition> {
+        define(
+            &mut self.brushes,
+            token,
+            value,
+            TokenFamily::Brush,
+            BrushToken::id,
         )?;
         self.advance_revision();
         Ok(())
@@ -164,6 +188,10 @@ impl StyleTokens {
         self.colors.get(token).copied()
     }
     #[must_use]
+    pub fn brush(&self, token: &BrushToken) -> Option<&Brush> {
+        self.brushes.get(token)
+    }
+    #[must_use]
     pub fn spacing(&self, token: &SpacingToken) -> Option<EdgeInsets> {
         self.spacing.get(token).copied()
     }
@@ -178,6 +206,7 @@ impl StyleTokens {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.colors.is_empty()
+            && self.brushes.is_empty()
             && self.spacing.is_empty()
             && self.radii.is_empty()
             && self.typography.is_empty()
