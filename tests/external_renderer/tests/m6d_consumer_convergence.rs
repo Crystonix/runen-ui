@@ -6,11 +6,11 @@ use reference_consumer::{
 };
 use runenui_core::{
     Brush, Color, ContributionClip, Element, HitContribution, HitContributionContext, HitRegion,
-    IntoEffects, LogicalLength, LogicalPoint, LogicalRect, LogicalSize, LogicalTransform,
-    MountedNodeId, NoHostProtocol, PaintContribution, PaintContributionContext,
-    PaintContributionItem, PaintPrimitive, PointerPolicy, Radius, ResourceKind, ResourceRef,
-    SceneLayer, SceneOpacity, SceneShape, StrokeJoin, StrokeStyle, StyleEnvironment, UiApp, View,
-    Widget, WidgetMeasure,
+    ImageDescriptor, ImageIntrinsicSize, ImageMapping, ImagePaintDescriptor, IntoEffects,
+    LogicalLength, LogicalPoint, LogicalRect, LogicalSize, LogicalTransform, MountedNodeId,
+    NoHostProtocol, PaintContribution, PaintContributionContext, PaintContributionItem,
+    PaintPrimitive, PointerPolicy, Radius, ResourceKind, ResourceRef, SceneLayer, SceneOpacity,
+    SceneShape, StrokeJoin, StrokeStyle, StyleEnvironment, UiApp, View, Widget, WidgetMeasure,
 };
 use runenui_external_renderer_conformance::{
     ConsumerSnapshot, SceneConsumer, UpdateMode, sample_literal_paint,
@@ -19,6 +19,9 @@ use runenui_runtime::{
     AppRuntime, HitTestScene, LayoutConstraints, PaintPublication, RasterScale, SceneCapabilities,
     SurfaceBuildContext,
 };
+
+const IMAGE_INTRINSIC_WIDTH: u32 = 8;
+const IMAGE_INTRINSIC_HEIGHT: u32 = 8;
 
 #[derive(Debug)]
 struct SceneOwner {
@@ -58,8 +61,7 @@ impl Widget<()> for SceneOwner {
                 LogicalLength::from(2_u16),
             )
             .with_layer(SceneLayer::new(1)),
-            PaintContributionItem::image(self.image.clone(), rect(1.0, 20.0, 8.0, 8.0))
-                .unwrap_or_else(|_| unreachable!("fixture image ref has image kind"))
+            image_item(self.image.clone(), rect(1.0, 20.0, 8.0, 8.0))
                 .with_layer(SceneLayer::new(2)),
             PaintContributionItem::shaped_text_run(
                 self.shaped.clone(),
@@ -151,6 +153,16 @@ const fn stroke_rect(
         Brush::solid(color),
         StrokeStyle::new(width),
     )
+}
+
+fn image_item(resource: ResourceRef, destination: LogicalRect) -> PaintContributionItem {
+    let intrinsic = ImageIntrinsicSize::new(IMAGE_INTRINSIC_WIDTH, IMAGE_INTRINSIC_HEIGHT)
+        .unwrap_or_else(|| unreachable!("fixture image extent is non-zero"));
+    let descriptor = ImageDescriptor::new(resource, intrinsic)
+        .unwrap_or_else(|_| unreachable!("fixture resource has image kind"));
+    let paint = ImagePaintDescriptor::new(descriptor, destination, ImageMapping::default())
+        .unwrap_or_else(|_| unreachable!("fixture image mapping is valid"));
+    PaintContributionItem::image(paint)
 }
 
 fn point(x: f32, y: f32) -> LogicalPoint {
@@ -407,7 +419,10 @@ fn reference_image_surface_point(
         return None;
     }
     let image = item.primitive().as_image()?;
-    let destination = image.destination();
+    if image.resolved_patch_count()? != 1 {
+        return None;
+    }
+    let (_, destination) = image.resolved_patch(0)?;
     let local = LogicalPoint::new(
         destination.width().mul_add(normalized.x(), destination.x()),
         destination
@@ -537,7 +552,18 @@ fn assert_resource_contract(snapshot: &ConsumerSnapshot, reference: &ReferenceSn
         .primitive()
         .as_image()
         .unwrap_or_else(|| unreachable!("fourth canonical item is image"));
-    assert_eq!(image.destination(), rect(1.0, 20.0, 8.0, 8.0));
+    let intrinsic = ImageIntrinsicSize::new(IMAGE_INTRINSIC_WIDTH, IMAGE_INTRINSIC_HEIGHT)
+        .unwrap_or_else(|| unreachable!("fixture image extent is non-zero"));
+    assert_eq!(image.authored_descriptor(), None);
+    assert_eq!(image.resolved_intrinsic_size(), Some(intrinsic));
+    assert_eq!(image.resolved_patch_count(), Some(1));
+    assert_eq!(
+        image.resolved_patch(0),
+        Some((
+            [0.0, 0.0, IMAGE_INTRINSIC_WIDTH as f32, IMAGE_INTRINSIC_HEIGHT as f32],
+            rect(1.0, 20.0, 8.0, 8.0),
+        ))
+    );
     assert_eq!(image.resource_ref().kind(), ResourceKind::Image);
     assert_eq!(image_record.primitive(), reference_image_record.primitive());
     for normalized in [point(0.0, 0.0), point(0.5, 0.5), point(1.0, 1.0)] {
