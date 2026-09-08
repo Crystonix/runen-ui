@@ -20,6 +20,14 @@ macro_rules! color_token {
     };
 }
 
+/// Creates a compile-time-validated typed brush-token reference.
+#[macro_export]
+macro_rules! brush_token {
+    ($value:literal) => {
+        $crate::BrushToken::new($crate::token_id!($value))
+    };
+}
+
 /// Creates a compile-time-validated typed spacing-token reference.
 #[macro_export]
 macro_rules! spacing_token {
