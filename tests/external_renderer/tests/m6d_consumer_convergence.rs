@@ -141,7 +141,11 @@ const fn fill_rect(rect: LogicalRect, color: Color) -> PaintContributionItem {
     PaintContributionItem::fill(SceneShape::rect(rect), Brush::solid(color))
 }
 
-const fn stroke_rect(rect: LogicalRect, color: Color, width: LogicalLength) -> PaintContributionItem {
+const fn stroke_rect(
+    rect: LogicalRect,
+    color: Color,
+    width: LogicalLength,
+) -> PaintContributionItem {
     PaintContributionItem::stroke(
         SceneShape::rect(rect),
         Brush::solid(color),
