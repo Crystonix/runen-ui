@@ -560,7 +560,12 @@ fn assert_resource_contract(snapshot: &ConsumerSnapshot, reference: &ReferenceSn
     assert_eq!(
         image.resolved_patch(0),
         Some((
-            [0.0, 0.0, IMAGE_INTRINSIC_WIDTH as f32, IMAGE_INTRINSIC_HEIGHT as f32],
+            [
+                0.0,
+                0.0,
+                f64::from(IMAGE_INTRINSIC_WIDTH),
+                f64::from(IMAGE_INTRINSIC_HEIGHT),
+            ],
             rect(1.0, 20.0, 8.0, 8.0),
         ))
     );
