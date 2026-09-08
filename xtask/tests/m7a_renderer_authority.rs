@@ -11,6 +11,7 @@ const RENDERER_SOURCE: &str = "crates/runenui_render_wgpu/src";
 const RENDERER_BACKEND_SOURCE: &str = "crates/runenui_render_wgpu/src/backend.rs";
 
 const ALLOWED_CORE_IDENTIFIERS: &[&str] = &[
+    "Brush",
     "Color",
     "ImagePrimitive",
     "LogicalLength",
@@ -26,6 +27,8 @@ const ALLOWED_CORE_IDENTIFIERS: &[&str] = &[
     "SceneOpacity",
     "SceneShape",
     "ShapedTextRunPrimitive",
+    "StrokeJoin",
+    "StrokeStyle",
     "SurfaceId",
 ];
 
