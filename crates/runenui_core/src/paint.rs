@@ -313,9 +313,9 @@ impl PaintContributionItem {
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub enum PaintPrimitive {
-    /// Generic logical shape filled by one RunenUI brush.
+    /// Generic logical shape filled by one `RunenUI` brush.
     Fill { shape: SceneShape, brush: Brush },
-    /// Generic logical shape stroked by one RunenUI brush and centered stroke style.
+    /// Generic logical shape stroked by one `RunenUI` brush and centered stroke style.
     Stroke {
         shape: SceneShape,
         brush: Brush,
@@ -337,7 +337,7 @@ impl PaintPrimitive {
         }
     }
 
-    /// Returns the RunenUI brush for generic fill/stroke primitives.
+    /// Returns the `RunenUI` brush for generic fill/stroke primitives.
     #[must_use]
     pub const fn brush(&self) -> Option<&Brush> {
         match self {
