@@ -9,7 +9,8 @@ use std::{
 };
 
 use runenui_core::{
-    Brush, Color, Element, LogicalLength, LogicalRect, LogicalSize, NoHostProtocol,
+    Brush, Color, Element, ImageDescriptor, ImageIntrinsicSize, ImageMapping,
+    ImagePaintDescriptor, LogicalLength, LogicalRect, LogicalSize, NoHostProtocol,
     PaintContribution, PaintContributionContext, PaintContributionItem, ResourceKind, ResourceRef,
     SceneShape, StyleEnvironment, UiApp, Widget, WidgetMeasure, WidgetUpdateContext,
 };
@@ -85,6 +86,22 @@ const fn fill_rect(rect: LogicalRect, color: Color) -> PaintContributionItem {
     PaintContributionItem::fill(SceneShape::rect(rect), Brush::solid(color))
 }
 
+fn image_item(
+    resource: ResourceRef,
+    intrinsic_width: u32,
+    intrinsic_height: u32,
+    destination: LogicalRect,
+) -> PaintContributionItem {
+    let intrinsic = ImageIntrinsicSize::new(intrinsic_width, intrinsic_height)
+        .unwrap_or_else(|| unreachable!("fixture intrinsic extent is non-zero"));
+    let descriptor = ImageDescriptor::new(resource, intrinsic)
+        .unwrap_or_else(|_| unreachable!("fixture ref is image-kind"));
+    PaintContributionItem::image(
+        ImagePaintDescriptor::new(descriptor, destination, ImageMapping::default())
+            .unwrap_or_else(|_| unreachable!("fixture image mapping is valid")),
+    )
+}
+
 fn publication(items: Vec<PaintContributionItem>) -> PaintPublication {
     let mut runtime = AppRuntime::<FixtureApp>::mount(items);
     let environment = StyleEnvironment::default();
@@ -156,37 +173,29 @@ fn resource_cache_loss_forces_full_resync_and_reloads_before_repaint() -> Result
     };
     let image_ref = ResourceRef::new(ResourceKind::Image);
     let provider = SwitchableImageProvider::new(image_ref.clone())?;
-    let image = PaintContributionItem::image(
+    let image = image_item(
         image_ref,
+        1,
+        1,
         rect(
             0.0,
             0.0,
             f32::from(SURFACE_WIDTH),
             f32::from(SURFACE_HEIGHT),
         ),
-    )?;
+    );
     let image_publication = publication(vec![image]);
 
     let first = renderer.render_offscreen_publication(&image_publication, &provider)?;
-    assert_eq!(
-        first.update_plan().mode(),
-        PublicationUpdateMode::FullResync
-    );
+    assert_eq!(first.update_plan().mode(), PublicationUpdateMode::FullResync);
     let generation = first.target_generation();
     assert_eq!(provider.loads(), 1);
     assert_eq!(pixel(first.readback(), 4, 4), IMAGE_RGBA);
 
     let current = renderer.render_offscreen_publication(&image_publication, &provider)?;
-    assert_eq!(
-        current.update_plan().mode(),
-        PublicationUpdateMode::AlreadyCurrent
-    );
+    assert_eq!(current.update_plan().mode(), PublicationUpdateMode::AlreadyCurrent);
     assert_eq!(current.target_generation(), generation);
-    assert_eq!(
-        provider.loads(),
-        1,
-        "already-current rendering reuses the cache"
-    );
+    assert_eq!(provider.loads(), 1, "already-current rendering reuses the cache");
 
     assert!(renderer.discard_resource_cache());
     provider.set_available(false);
@@ -206,10 +215,7 @@ fn resource_cache_loss_forces_full_resync_and_reloads_before_repaint() -> Result
 
     provider.set_available(true);
     let rebuilt = renderer.render_offscreen_publication(&image_publication, &provider)?;
-    assert_eq!(
-        rebuilt.update_plan().mode(),
-        PublicationUpdateMode::FullResync
-    );
+    assert_eq!(rebuilt.update_plan().mode(), PublicationUpdateMode::FullResync);
     assert_eq!(
         rebuilt.target_generation(),
         generation,
@@ -244,10 +250,40 @@ fn resource_cache_loss_forces_full_resync_and_reloads_before_repaint() -> Result
     );
     assert_eq!(provider.loads(), 4);
 
-    eprintln!(
-        "REAL GPU RESOURCE CACHE PROOF: cache reuse, cache-loss full resync, provider preflight failure, retained-target preservation, and provider-backed reconstruction succeeded; adapter={:?} backend={}",
-        renderer.diagnostics().adapter_info().name,
-        renderer.diagnostics().adapter_info().backend,
+    Ok(())
+}
+
+#[test]
+fn cached_image_extent_mismatch_fails_without_provider_reload() -> Result<(), Box<dyn Error>> {
+    let Some(mut renderer) = renderer_or_adapterless()? else {
+        return Ok(());
+    };
+    let image_ref = ResourceRef::new(ResourceKind::Image);
+    let provider = SwitchableImageProvider::new(image_ref.clone())?;
+    let destination = rect(0.0, 0.0, 8.0, 8.0);
+
+    let accepted = publication(vec![image_item(image_ref.clone(), 1, 1, destination)]);
+    renderer.render_offscreen_publication(&accepted, &provider)?;
+    assert_eq!(provider.loads(), 1);
+
+    let conflicting = publication(vec![image_item(image_ref, 2, 1, destination)]);
+    let error = renderer.render_offscreen_publication(&conflicting, &provider);
+    assert!(matches!(
+        error,
+        Err(PublicationRenderError::Resource {
+            item_index: 0,
+            error: ResourceResolveError::ImageExtentMismatch {
+                expected_width: 2,
+                expected_height: 1,
+                actual_width: 1,
+                actual_height: 1,
+            },
+        })
+    ));
+    assert_eq!(
+        provider.loads(),
+        1,
+        "cached payload extent is authoritative evidence for the same complete ref and must be checked before provider reload"
     );
     Ok(())
 }
