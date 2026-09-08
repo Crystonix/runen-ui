@@ -3,11 +3,12 @@ use core::fmt;
 use crate::{
     BrushValue, ColorValue, ElementId, ElementKey, FlexContainerStyle, FlexDirection,
     HitContribution, HitContributionContext, IntoElementId, IntoElementKey, LayoutContainer,
-    LayoutStyle, LogicalLength, LogicalRect, LogicalSize, PaintContribution,
-    PaintContributionContext, PaintContributionItem, RadiusValue, SceneShape, SemanticAction,
-    SemanticContribution, SemanticContributionContext, SemanticNodeContribution, SemanticRole,
-    SemanticState, SemanticText, SpacingValue, StyleIntent, StyleRecipeId, StyleVariantId,
-    TypographyValue, WidgetActivationContext, WidgetInvalidation, WidgetUpdateContext,
+    LayoutStyle, LogicalLength, LogicalRect, LogicalSize, OpacityValue, OutlineValue,
+    PaintContribution, PaintContributionContext, PaintContributionItem, RadiusValue, SceneShape,
+    SemanticAction, SemanticContribution, SemanticContributionContext, SemanticNodeContribution,
+    SemanticRole, SemanticState, SemanticText, ShadowValue, SpacingValue, StyleIntent,
+    StyleRecipeId, StyleVariantId, TypographyValue, WidgetActivationContext, WidgetInvalidation,
+    WidgetUpdateContext,
     element::{
         AuthoredElementFields, AuthoringDiagnostic, ChildBearingWidget, Element, View, Views,
         Widget, WidgetActivation, WidgetActivationOutput, WidgetMeasure, WidgetMeasureInput,
@@ -65,6 +66,21 @@ macro_rules! common_builder_methods {
         #[must_use]
         pub fn typography(mut self, value: impl Into<TypographyValue>) -> Self {
             self.style = self.style.with_typography(value);
+            self
+        }
+        #[must_use]
+        pub fn outline(mut self, value: impl Into<OutlineValue>) -> Self {
+            self.style = self.style.with_outline(value);
+            self
+        }
+        #[must_use]
+        pub fn shadows(mut self, value: impl Into<ShadowValue>) -> Self {
+            self.style = self.style.with_shadows(value);
+            self
+        }
+        #[must_use]
+        pub fn opacity(mut self, value: impl Into<OpacityValue>) -> Self {
+            self.style = self.style.with_opacity(value);
             self
         }
     };
