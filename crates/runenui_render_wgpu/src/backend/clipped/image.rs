@@ -67,7 +67,7 @@ const IMAGE_ATTRIBUTES: [wgpu::VertexAttribute; 3] = [
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct SupportedImagePatch {
-    pub(super) source: [f32; 4],
+    pub(super) source: [f64; 4],
     pub(super) destination: LogicalRect,
 }
 
@@ -461,7 +461,7 @@ fn append_patch_vertices(
     let destination_y = f64::from(patch.destination.y());
     let destination_width = f64::from(patch.destination.width());
     let destination_height = f64::from(patch.destination.height());
-    let [source_x, source_y, source_width, source_height] = patch.source.map(f64::from);
+    let [source_x, source_y, source_width, source_height] = patch.source;
     let intrinsic_width = f64::from(image.intrinsic_size.width());
     let intrinsic_height = f64::from(image.intrinsic_size.height());
     let vertices = polygon
@@ -577,7 +577,7 @@ mod tests {
     }
 
     fn image(
-        source: [f32; 4],
+        source: [f64; 4],
         destination: LogicalRect,
         transform: LogicalTransform,
     ) -> SupportedImage {
