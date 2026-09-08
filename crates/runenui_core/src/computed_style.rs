@@ -1,6 +1,6 @@
 //! Runtime-resolved host-neutral style data.
 
-use crate::{Brush, Color, EdgeInsets, Radius, Typography};
+use crate::{Brush, Color, DropShadow, EdgeInsets, Outline, Radius, SceneOpacity, Typography};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ComputedStyle {
@@ -9,6 +9,9 @@ pub struct ComputedStyle {
     padding: Option<EdgeInsets>,
     radius: Option<Radius>,
     typography: Option<Typography>,
+    outline: Option<Outline>,
+    shadows: Vec<DropShadow>,
+    opacity: SceneOpacity,
 }
 
 impl ComputedStyle {
@@ -18,6 +21,9 @@ impl ComputedStyle {
         padding: None,
         radius: None,
         typography: None,
+        outline: None,
+        shadows: Vec::new(),
+        opacity: SceneOpacity::OPAQUE,
     };
     #[must_use]
     pub const fn is_empty(&self) -> bool {
@@ -26,6 +32,9 @@ impl ComputedStyle {
             && self.padding.is_none()
             && self.radius.is_none()
             && self.typography.is_none()
+            && self.outline.is_none()
+            && self.shadows.is_empty()
+            && self.opacity.get() == SceneOpacity::OPAQUE.get()
     }
     #[must_use]
     pub const fn with_foreground(mut self, value: Color) -> Self {
@@ -53,6 +62,21 @@ impl ComputedStyle {
         self
     }
     #[must_use]
+    pub fn with_outline(mut self, value: Outline) -> Self {
+        self.outline = Some(value);
+        self
+    }
+    #[must_use]
+    pub fn with_shadows(mut self, value: Vec<DropShadow>) -> Self {
+        self.shadows = value;
+        self
+    }
+    #[must_use]
+    pub const fn with_opacity(mut self, value: SceneOpacity) -> Self {
+        self.opacity = value;
+        self
+    }
+    #[must_use]
     pub const fn foreground(&self) -> Option<Color> {
         self.foreground
     }
@@ -72,6 +96,18 @@ impl ComputedStyle {
     pub const fn typography(&self) -> Option<&Typography> {
         self.typography.as_ref()
     }
+    #[must_use]
+    pub const fn outline(&self) -> Option<&Outline> {
+        self.outline.as_ref()
+    }
+    #[must_use]
+    pub const fn shadows(&self) -> &[DropShadow] {
+        self.shadows.as_slice()
+    }
+    #[must_use]
+    pub const fn opacity(&self) -> SceneOpacity {
+        self.opacity
+    }
 
     pub(crate) const fn from_parts(
         foreground: Option<Color>,
@@ -79,6 +115,9 @@ impl ComputedStyle {
         padding: Option<EdgeInsets>,
         radius: Option<Radius>,
         typography: Option<Typography>,
+        outline: Option<Outline>,
+        shadows: Vec<DropShadow>,
+        opacity: SceneOpacity,
     ) -> Self {
         Self {
             foreground,
@@ -86,6 +125,9 @@ impl ComputedStyle {
             padding,
             radius,
             typography,
+            outline,
+            shadows,
+            opacity,
         }
     }
 }
