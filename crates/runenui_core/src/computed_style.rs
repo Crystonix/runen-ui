@@ -1,11 +1,11 @@
 //! Runtime-resolved host-neutral style data.
 
-use crate::{Color, EdgeInsets, Radius, Typography};
+use crate::{Brush, Color, EdgeInsets, Radius, Typography};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ComputedStyle {
     foreground: Option<Color>,
-    background: Option<Color>,
+    background: Option<Brush>,
     padding: Option<EdgeInsets>,
     radius: Option<Radius>,
     typography: Option<Typography>,
@@ -33,8 +33,8 @@ impl ComputedStyle {
         self
     }
     #[must_use]
-    pub const fn with_background(mut self, value: Color) -> Self {
-        self.background = Some(value);
+    pub fn with_background(mut self, value: impl Into<Brush>) -> Self {
+        self.background = Some(value.into());
         self
     }
     #[must_use]
@@ -57,8 +57,8 @@ impl ComputedStyle {
         self.foreground
     }
     #[must_use]
-    pub const fn background(&self) -> Option<Color> {
-        self.background
+    pub const fn background(&self) -> Option<&Brush> {
+        self.background.as_ref()
     }
     #[must_use]
     pub const fn padding(&self) -> Option<EdgeInsets> {
@@ -75,7 +75,7 @@ impl ComputedStyle {
 
     pub(crate) const fn from_parts(
         foreground: Option<Color>,
-        background: Option<Color>,
+        background: Option<Brush>,
         padding: Option<EdgeInsets>,
         radius: Option<Radius>,
         typography: Option<Typography>,
