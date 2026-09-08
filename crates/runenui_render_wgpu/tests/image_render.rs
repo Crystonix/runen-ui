@@ -9,10 +9,10 @@ use std::{
 };
 
 use runenui_core::{
-    Color, ContributionClip, Element, LogicalLength, LogicalRect, LogicalSize, LogicalTransform,
-    NoHostProtocol, PaintContribution, PaintContributionContext, PaintContributionItem, Radius,
-    ResourceKind, ResourceRef, SceneOpacity, SceneShape, StyleEnvironment, UiApp, Widget,
-    WidgetMeasure, WidgetUpdateContext,
+    Brush, Color, ContributionClip, Element, LogicalLength, LogicalRect, LogicalSize,
+    LogicalTransform, NoHostProtocol, PaintContribution, PaintContributionContext,
+    PaintContributionItem, Radius, ResourceKind, ResourceRef, SceneOpacity, SceneShape,
+    StyleEnvironment, UiApp, Widget, WidgetMeasure, WidgetUpdateContext,
 };
 use runenui_render_wgpu::{
     BackendSelection, ImagePayload, Renderer, RendererInitError, RendererOptions, ResourcePayload,
@@ -86,6 +86,10 @@ impl UiApp for FixtureApp {
 fn rect(x: f32, y: f32, width: f32, height: f32) -> LogicalRect {
     LogicalRect::try_new(x, y, width, height)
         .unwrap_or_else(|_| unreachable!("fixture rectangle is valid"))
+}
+
+fn fill_rect(rect: LogicalRect, color: Color) -> PaintContributionItem {
+    PaintContributionItem::fill(SceneShape::rect(rect), Brush::solid(color))
 }
 
 fn publication(items: Vec<PaintContributionItem>) -> PaintPublication {
@@ -218,7 +222,7 @@ fn real_gpu_image_semantics_match_scene_contract() -> Result<(), Box<dyn Error>>
         .with_opacity(SceneOpacity::new(0.5)?);
     let overlay = Color::rgb(0xE0, 0xA0, 0x20);
     let publication = publication(vec![
-        PaintContributionItem::fill_rect(
+        fill_rect(
             rect(
                 0.0,
                 0.0,
@@ -229,7 +233,7 @@ fn real_gpu_image_semantics_match_scene_contract() -> Result<(), Box<dyn Error>>
         ),
         transformed_image,
         translucent_image,
-        PaintContributionItem::fill_rect(rect(5.5, 4.5, 2.0, 2.0), overlay),
+        fill_rect(rect(5.5, 4.5, 2.0, 2.0), overlay),
     ]);
 
     let output = renderer.render_offscreen_publication(&publication, &provider)?;
