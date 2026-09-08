@@ -1,9 +1,9 @@
 #![allow(refining_impl_trait)]
 
 use runenui_core::{
-    Color, EdgeInsets, Element, FontFamilyName, GenericFontFamily, LayoutDimension, LayoutStyle,
-    LogicalLength, NoHostProtocol, Radius, StyleEnvironment, StyleTokens, UiApp, View, button,
-    children, color_token, column, radius_token, row, spacing_token, text,
+    Brush, Color, EdgeInsets, Element, FontFamilyName, GenericFontFamily, LayoutDimension,
+    LayoutStyle, LogicalLength, NoHostProtocol, Radius, StyleEnvironment, StyleTokens, UiApp, View,
+    button, children, color_token, column, radius_token, row, spacing_token, text,
 };
 use runenui_runtime::{
     AppRuntime, LayoutConstraints, LogicalPoint, LogicalSize, MountedNodeId, PumpBudget,
@@ -517,7 +517,10 @@ fn warmed_literal_background_change_reads_current_mounted_style() {
         LayoutConstraints::unbounded(),
     );
     assert_common_phases(&runtime, &[SurfacePhase::Style, SurfacePhase::Paint]);
-    assert_eq!(root_style(&after).background(), Some(Color::WHITE));
+    assert_eq!(
+        root_style(&after).background(),
+        Some(&Brush::solid(Color::WHITE))
+    );
     assert_mounted_identities(&mut runtime, &identities);
 }
 
