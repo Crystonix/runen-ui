@@ -1,10 +1,10 @@
 use core::fmt;
 
 use crate::{
-    ColorValue, ElementId, ElementKey, FlexContainerStyle, FlexDirection, HitContribution,
+    Brush, ColorValue, ElementId, ElementKey, FlexContainerStyle, FlexDirection, HitContribution,
     HitContributionContext, IntoElementId, IntoElementKey, LayoutContainer, LayoutStyle,
     LogicalLength, LogicalRect, LogicalSize, PaintContribution, PaintContributionContext,
-    PaintContributionItem, RadiusValue, SemanticAction, SemanticContribution,
+    PaintContributionItem, RadiusValue, SceneShape, SemanticAction, SemanticContribution,
     SemanticContributionContext, SemanticNodeContribution, SemanticRole, SemanticState,
     SemanticText, SpacingValue, StyleIntent, StyleRecipeId, StyleVariantId, TypographyValue,
     WidgetActivationContext, WidgetInvalidation, WidgetUpdateContext,
@@ -490,9 +490,9 @@ fn background_paint(context: &PaintContributionContext) -> PaintContribution {
         .computed_style()
         .background()
         .map_or_else(PaintContribution::empty, |color| {
-            PaintContribution::single(PaintContributionItem::fill_rect(
-                local_rect(context.local_size()),
-                color,
+            PaintContribution::single(PaintContributionItem::fill(
+                SceneShape::rect(local_rect(context.local_size())),
+                Brush::solid(color),
             ))
         })
 }

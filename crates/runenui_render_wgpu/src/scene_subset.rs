@@ -1,13 +1,17 @@
 use core::{error::Error, fmt};
 
 use runenui_core::{
-    Color, LogicalRect, LogicalTransform, PaintPrimitive, ResourceKind, SceneOpacity,
+    Brush, Color, LogicalRect, LogicalTransform, PaintPrimitive, ResourceKind, SceneOpacity,
+    SceneShape, StrokeJoin, StrokeStyle,
 };
 use runenui_runtime::{PaintPublication, PaintSceneItem, SceneCapabilities};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UnsupportedSceneSemantic {
-    StrokeRect,
+    Stroke,
+    NonRectShape,
+    NonSolidBrush,
+    StrokeStyle,
     Image,
     ShapedTextRun,
     UnknownPrimitive,
@@ -58,10 +62,9 @@ pub struct SupportedFillRect {
 /// One renderer-admitted literal rectangle item represented by a color-bearing
 /// rectangle plus an optional inner rectangle that must be excluded.
 ///
-/// Ordinary fills and centered strokes whose inset collapses have no inner
-/// exclusion. A non-collapsed stroke retains the exact accepted f32 inset from
-/// the independent M6 literal-paint oracle rather than reconstructing a backend
-/// line primitive.
+/// The public scene vocabulary is generic M9 fill/stroke. This temporary renderer
+/// checkpoint admits only rectangular solid brushes and, for strokes, the exact
+/// sharp-miter subset represented by the existing literal rectangle mask path.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct SupportedLiteralRect {
     pub(crate) fill: SupportedFillRect,
@@ -80,24 +83,58 @@ pub(crate) fn publication_resource_error(
         })
 }
 
-/// Validates one literal fill/stroke primitive without applying the temporary
-/// base-renderer clip/stroke subset gate.
+/// Validates one currently realized generic fill/stroke item without applying
+/// the temporary base-renderer clip gate.
 ///
-/// A centered stroke follows the accepted M6 independent compositor exactly:
-/// zero width/area and checked derived-rectangle overflow have no coverage;
-/// otherwise the color geometry is the checked expanded rectangle and a valid
-/// non-collapsed inset is retained as an exclusion mask.
+/// Generic public semantics are not narrowed here: unsupported shapes, brushes,
+/// and stroke styles fail closed until their M9A realization lands.
 pub(crate) const fn validate_literal_rect_item(
     item_index: usize,
     item: &PaintSceneItem,
 ) -> Result<Option<SupportedLiteralRect>, SceneValidationError> {
     match item.primitive() {
-        PaintPrimitive::FillRect { rect, color } => Ok(Some(SupportedLiteralRect {
-            fill: supported_fill_rect(item, *rect, *color),
-            stroke_inset: None,
-        })),
-        PaintPrimitive::StrokeRect { rect, color, width } => {
-            Ok(supported_stroke_rect(item, *rect, *color, width.get()))
+        PaintPrimitive::Fill { shape, brush } => {
+            let SceneShape::Rect(rect) = shape else {
+                return Err(unsupported(
+                    item_index,
+                    UnsupportedSceneSemantic::NonRectShape,
+                ));
+            };
+            let Brush::Solid(color) = brush else {
+                return Err(unsupported(
+                    item_index,
+                    UnsupportedSceneSemantic::NonSolidBrush,
+                ));
+            };
+            Ok(Some(SupportedLiteralRect {
+                fill: supported_fill_rect(item, *rect, *color),
+                stroke_inset: None,
+            }))
+        }
+        PaintPrimitive::Stroke {
+            shape,
+            brush,
+            style,
+        } => {
+            let SceneShape::Rect(rect) = shape else {
+                return Err(unsupported(
+                    item_index,
+                    UnsupportedSceneSemantic::NonRectShape,
+                ));
+            };
+            let Brush::Solid(color) = brush else {
+                return Err(unsupported(
+                    item_index,
+                    UnsupportedSceneSemantic::NonSolidBrush,
+                ));
+            };
+            if !supports_literal_rect_stroke(*style) {
+                return Err(unsupported(
+                    item_index,
+                    UnsupportedSceneSemantic::StrokeStyle,
+                ));
+            }
+            Ok(supported_stroke_rect(item, *rect, *color, style.width().get()))
         }
         PaintPrimitive::Image(_) => Err(unsupported(item_index, UnsupportedSceneSemantic::Image)),
         PaintPrimitive::ShapedTextRun(_) => Err(unsupported(
@@ -109,6 +146,10 @@ pub(crate) const fn validate_literal_rect_item(
             UnsupportedSceneSemantic::UnknownPrimitive,
         )),
     }
+}
+
+const fn supports_literal_rect_stroke(style: StrokeStyle) -> bool {
+    style.join() == StrokeJoin::Miter && style.miter_limit() >= 1.414_213_5
 }
 
 const fn supported_fill_rect(
@@ -168,18 +209,15 @@ pub(crate) const fn validate_fill_rect_item(
     item_index: usize,
     item: &PaintSceneItem,
 ) -> Result<SupportedFillRect, SceneValidationError> {
-    if matches!(item.primitive(), PaintPrimitive::StrokeRect { .. }) {
+    if matches!(item.primitive(), PaintPrimitive::Stroke { .. }) {
         return Err(unsupported(
             item_index,
-            UnsupportedSceneSemantic::StrokeRect,
+            UnsupportedSceneSemantic::Stroke,
         ));
     }
     match validate_literal_rect_item(item_index, item) {
         Ok(Some(literal)) => Ok(literal.fill),
-        Ok(None) => Err(unsupported(
-            item_index,
-            UnsupportedSceneSemantic::StrokeRect,
-        )),
+        Ok(None) => Err(unsupported(item_index, UnsupportedSceneSemantic::Stroke)),
         Err(error) => Err(error),
     }
 }

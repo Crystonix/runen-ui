@@ -1,8 +1,9 @@
 //! Renderer-neutral owner-local paint contribution vocabulary.
 
 use crate::{
-    Color, ComputedStyle, ContributionClip, LogicalLength, LogicalPoint, LogicalRect, LogicalSize,
+    Brush, Color, ComputedStyle, ContributionClip, LogicalPoint, LogicalRect, LogicalSize,
     LogicalTransform, ResourceKind, ResourceKindMismatch, ResourceRef, SceneLayer, SceneOpacity,
+    SceneShape, StrokeStyle,
 };
 
 /// Read-only facts supplied while one mounted widget contributes paint.
@@ -79,9 +80,9 @@ impl PaintContribution {
 
 /// One validated image paint primitive.
 ///
-/// The destination is an owner-local logical rectangle. The complete normalized
-/// image domain `(0, 0)..(1, 1)` maps affinely to this rectangle; the primitive
-/// carries no implicit fit, crop, repeat, decoding, lookup, or realization mode.
+/// This is the inherited M6 exact-mapped image authority and remains only until
+/// the separate M9 image-descriptor clean cutover. Fill/stroke authority no
+/// longer depends on this rectangle-specific representation.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImagePrimitive {
     resource: ResourceRef,
@@ -203,20 +204,23 @@ impl PaintContributionItem {
         }
     }
 
-    /// Creates a filled logical rectangle using one literal core color.
+    /// Creates one generic filled logical shape.
     #[must_use]
-    pub const fn fill_rect(rect: LogicalRect, color: Color) -> Self {
-        Self::from_primitive(PaintPrimitive::FillRect { rect, color })
+    pub const fn fill(shape: SceneShape, brush: Brush) -> Self {
+        Self::from_primitive(PaintPrimitive::Fill { shape, brush })
     }
 
-    /// Creates a centered logical rectangle stroke.
+    /// Creates one generic centered logical shape stroke.
     ///
-    /// [`LogicalLength`] guarantees a finite non-negative width. Width zero is
-    /// retained literally and means no stroke coverage; it is never a backend
-    /// hairline request.
+    /// [`StrokeStyle`] owns the complete initial cap/join/miter contract. A zero
+    /// width remains literal no-coverage semantics and is never a backend hairline.
     #[must_use]
-    pub const fn stroke_rect(rect: LogicalRect, color: Color, width: LogicalLength) -> Self {
-        Self::from_primitive(PaintPrimitive::StrokeRect { rect, color, width })
+    pub const fn stroke(shape: SceneShape, brush: Brush, style: StrokeStyle) -> Self {
+        Self::from_primitive(PaintPrimitive::Stroke {
+            shape,
+            brush,
+            style,
+        })
     }
 
     /// Creates an image item with exact owner-local logical placement.
@@ -309,53 +313,45 @@ impl PaintContributionItem {
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub enum PaintPrimitive {
-    /// Filled logical rectangle.
-    FillRect { rect: LogicalRect, color: Color },
-    /// Centered mitered logical rectangle stroke.
-    StrokeRect {
-        rect: LogicalRect,
-        color: Color,
-        width: LogicalLength,
+    /// Generic logical shape filled by one RunenUI brush.
+    Fill { shape: SceneShape, brush: Brush },
+    /// Generic logical shape stroked by one RunenUI brush and centered stroke style.
+    Stroke {
+        shape: SceneShape,
+        brush: Brush,
+        style: StrokeStyle,
     },
-    /// Image resource mapped exactly to one logical destination rectangle.
+    /// Inherited exact-mapped image resource pending the separate M9 image cutover.
     Image(ImagePrimitive),
     /// Shaped resource whose local origin is placed at one finite logical point.
     ShapedTextRun(ShapedTextRunPrimitive),
 }
 
 impl PaintPrimitive {
-    /// Returns the primitive's rectangle when it is rectangle-addressed.
-    ///
-    /// Image destinations participate; shaped runs retain resource-owned geometry
-    /// and therefore have no implicit rectangle.
+    /// Returns generic shape geometry for fill/stroke primitives.
     #[must_use]
-    pub const fn rect(&self) -> Option<LogicalRect> {
+    pub const fn shape(&self) -> Option<&SceneShape> {
         match self {
-            Self::FillRect { rect, .. } | Self::StrokeRect { rect, .. } => Some(*rect),
-            Self::Image(image) => Some(image.destination()),
-            Self::ShapedTextRun(_) => None,
+            Self::Fill { shape, .. } | Self::Stroke { shape, .. } => Some(shape),
+            Self::Image(_) | Self::ShapedTextRun(_) => None,
         }
     }
 
-    /// Returns the primitive's literal unpremultiplied sRGB8 core color, when any.
-    ///
-    /// Image payload color is resource-owned. Shaped-run foreground is ordinary
-    /// literal scene color and is intentionally independent of resource identity.
+    /// Returns the RunenUI brush for generic fill/stroke primitives.
     #[must_use]
-    pub const fn color(&self) -> Option<Color> {
+    pub const fn brush(&self) -> Option<&Brush> {
         match self {
-            Self::FillRect { color, .. } | Self::StrokeRect { color, .. } => Some(*color),
-            Self::Image(_) => None,
-            Self::ShapedTextRun(run) => Some(run.foreground()),
+            Self::Fill { brush, .. } | Self::Stroke { brush, .. } => Some(brush),
+            Self::Image(_) | Self::ShapedTextRun(_) => None,
         }
     }
 
-    /// Returns stroke width when this is a stroke primitive.
+    /// Returns centered stroke policy when this is a stroke primitive.
     #[must_use]
-    pub const fn stroke_width(&self) -> Option<LogicalLength> {
+    pub const fn stroke_style(&self) -> Option<StrokeStyle> {
         match self {
-            Self::StrokeRect { width, .. } => Some(*width),
-            Self::FillRect { .. } | Self::Image(_) | Self::ShapedTextRun(_) => None,
+            Self::Stroke { style, .. } => Some(*style),
+            Self::Fill { .. } | Self::Image(_) | Self::ShapedTextRun(_) => None,
         }
     }
 
@@ -365,7 +361,7 @@ impl PaintPrimitive {
         match self {
             Self::Image(image) => Some(image.resource_ref()),
             Self::ShapedTextRun(run) => Some(run.resource_ref()),
-            Self::FillRect { .. } | Self::StrokeRect { .. } => None,
+            Self::Fill { .. } | Self::Stroke { .. } => None,
         }
     }
 
@@ -374,7 +370,7 @@ impl PaintPrimitive {
     pub const fn as_image(&self) -> Option<&ImagePrimitive> {
         match self {
             Self::Image(image) => Some(image),
-            Self::FillRect { .. } | Self::StrokeRect { .. } | Self::ShapedTextRun(_) => None,
+            Self::Fill { .. } | Self::Stroke { .. } | Self::ShapedTextRun(_) => None,
         }
     }
 
@@ -383,7 +379,7 @@ impl PaintPrimitive {
     pub const fn as_shaped_text_run(&self) -> Option<&ShapedTextRunPrimitive> {
         match self {
             Self::ShapedTextRun(run) => Some(run),
-            Self::FillRect { .. } | Self::StrokeRect { .. } | Self::Image(_) => None,
+            Self::Fill { .. } | Self::Stroke { .. } | Self::Image(_) => None,
         }
     }
 }
@@ -392,49 +388,61 @@ impl PaintPrimitive {
 mod tests {
     use super::{PaintContribution, PaintContributionItem, PaintPrimitive};
     use crate::{
-        Color, ContributionClip, LogicalLength, LogicalPoint, LogicalRect, LogicalTransform,
+        Brush, Color, ContributionClip, LogicalLength, LogicalPoint, LogicalRect, LogicalTransform,
         ResourceKind, ResourceKindMismatch, ResourceRef, SceneLayer, SceneOpacity, SceneShape,
+        StrokeStyle,
     };
 
     #[test]
-    fn contribution_preserves_literal_color_geometry_and_order() {
+    fn contribution_preserves_generic_shape_brush_stroke_and_order() {
         let first_rect = LogicalRect::try_new(0.0, 0.0, 10.0, 20.0)
             .unwrap_or_else(|_| unreachable!("test rectangle is valid"));
         let second_rect = LogicalRect::try_new(1.0, 2.0, 3.0, 4.0)
             .unwrap_or_else(|_| unreachable!("test rectangle is valid"));
-        let stroke =
-            LogicalLength::new(2.0).unwrap_or_else(|_| unreachable!("test stroke width is valid"));
+        let stroke = StrokeStyle::new(
+            LogicalLength::new(2.0).unwrap_or_else(|_| unreachable!("test stroke width is valid")),
+        );
+        let first_brush = Brush::solid(Color::rgba(1, 2, 3, 4));
+        let second_brush = Brush::solid(Color::rgba(5, 6, 7, 8));
         let contribution = PaintContribution::new(vec![
-            PaintContributionItem::fill_rect(first_rect, Color::rgba(1, 2, 3, 4)),
-            PaintContributionItem::stroke_rect(second_rect, Color::rgba(5, 6, 7, 8), stroke),
+            PaintContributionItem::fill(SceneShape::rect(first_rect), first_brush.clone()),
+            PaintContributionItem::stroke(
+                SceneShape::rect(second_rect),
+                second_brush.clone(),
+                stroke,
+            ),
         ]);
 
         assert_eq!(contribution.items().len(), 2);
         assert!(matches!(
             contribution.items()[0].primitive(),
-            PaintPrimitive::FillRect { rect, color }
-                if *rect == first_rect && *color == Color::rgba(1, 2, 3, 4)
+            PaintPrimitive::Fill { shape: SceneShape::Rect(rect), brush }
+                if *rect == first_rect && brush == &first_brush
         ));
         assert!(matches!(
             contribution.items()[1].primitive(),
-            PaintPrimitive::StrokeRect { rect, color, width }
-                if *rect == second_rect
-                    && *color == Color::rgba(5, 6, 7, 8)
-                    && *width == stroke
+            PaintPrimitive::Stroke { shape: SceneShape::Rect(rect), brush, style }
+                if *rect == second_rect && brush == &second_brush && *style == stroke
         ));
-        assert_eq!(contribution.items()[0].primitive().rect(), Some(first_rect));
         assert_eq!(
-            contribution.items()[0].primitive().color(),
-            Some(Color::rgba(1, 2, 3, 4))
+            contribution.items()[0].primitive().shape(),
+            Some(&SceneShape::rect(first_rect))
         );
+        assert_eq!(contribution.items()[0].primitive().brush(), Some(&first_brush));
+        assert_eq!(contribution.items()[1].primitive().stroke_style(), Some(stroke));
     }
 
     #[test]
     fn zero_width_stroke_remains_literal_zero() {
         let rect = LogicalRect::try_new(0.0, 0.0, 1.0, 1.0)
             .unwrap_or_else(|_| unreachable!("test rectangle is valid"));
-        let item = PaintContributionItem::stroke_rect(rect, Color::BLACK, LogicalLength::ZERO);
-        assert_eq!(item.primitive().stroke_width(), Some(LogicalLength::ZERO));
+        let style = StrokeStyle::new(LogicalLength::ZERO);
+        let item = PaintContributionItem::stroke(
+            SceneShape::rect(rect),
+            Brush::solid(Color::BLACK),
+            style,
+        );
+        assert_eq!(item.primitive().stroke_style(), Some(style));
     }
 
     #[test]
@@ -456,16 +464,22 @@ mod tests {
         .unwrap_or_else(|_| unreachable!("shaped ref has shaped-run kind"));
 
         assert_eq!(image.primitive().resource_ref(), Some(&image_ref));
-        assert_eq!(image.primitive().rect(), Some(rect));
-        assert_eq!(image.primitive().color(), None);
+        assert_eq!(
+            image.primitive().as_image().map(ImagePrimitive::destination),
+            Some(rect)
+        );
         assert_eq!(run.primitive().resource_ref(), Some(&shaped_ref));
-        assert_eq!(run.primitive().rect(), None);
-        assert_eq!(run.primitive().color(), Some(Color::rgba(1, 2, 3, 4)));
         assert_eq!(
             run.primitive()
                 .as_shaped_text_run()
                 .map(super::ShapedTextRunPrimitive::origin),
             Some(origin)
+        );
+        assert_eq!(
+            run.primitive()
+                .as_shaped_text_run()
+                .map(super::ShapedTextRunPrimitive::foreground),
+            Some(Color::rgba(1, 2, 3, 4))
         );
 
         let Err(wrong_image) = PaintContributionItem::image(shaped_ref, rect) else {
@@ -490,7 +504,10 @@ mod tests {
     fn item_composition_defaults_and_explicit_values_are_self_contained() {
         let rect = LogicalRect::try_new(0.0, 0.0, 4.0, 5.0)
             .unwrap_or_else(|_| unreachable!("test rectangle is valid"));
-        let default_item = PaintContributionItem::fill_rect(rect, Color::WHITE);
+        let default_item = PaintContributionItem::fill(
+            SceneShape::rect(rect),
+            Brush::solid(Color::WHITE),
+        );
         assert_eq!(default_item.local_transform(), LogicalTransform::IDENTITY);
         assert!(default_item.clips().is_empty());
         assert_eq!(default_item.opacity(), SceneOpacity::OPAQUE);
