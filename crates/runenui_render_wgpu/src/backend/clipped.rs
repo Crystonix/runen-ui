@@ -8,7 +8,7 @@ pub use resource::{PublicationRenderError, ResourceRenderer, UnsupportedShapedGl
 
 use std::collections::HashMap;
 
-use runenui_core::{Color, PaintPrimitive, Radius, SceneShape};
+use runenui_core::{Brush, Color, PaintPrimitive, Radius, SceneShape};
 use runenui_runtime::{PaintPublication, RasterScale, SceneClip};
 use wgpu::util::DeviceExt;
 
@@ -278,16 +278,17 @@ impl Renderer {
 
     /// Renders the exact currently supported scene subset and reads actual GPU bytes.
     ///
-    /// A publication containing only unclipped `FillRect` items delegates to the
-    /// already-validated base path. Explicit clips and centered `StrokeRect`
-    /// items use the stencil path while preserving the same color geometry,
-    /// affine transform, source-over, target, lineage, and readback authority.
-    /// A non-collapsed stroke draws its accepted expanded rectangle while the
-    /// exact accepted inset is cleared from the stencil mask; a collapsed inset
-    /// therefore naturally becomes the complete expanded rectangle. Zero-width,
-    /// zero-area, or checked derived-rectangle overflow contributes no coverage.
-    /// Ellipse and path clips are rejected by preflight until their M9A geometry
-    /// realization lands; they are never approximated as rectangular masks.
+    /// A publication containing only unclipped solid rectangular `Fill` items
+    /// delegates to the already-validated base path. Explicit clips and centered
+    /// rectangular `Stroke` items use the stencil path while preserving the same
+    /// color geometry, affine transform, source-over, target, lineage, and
+    /// readback authority. A non-collapsed stroke draws its accepted expanded
+    /// rectangle while the exact accepted inset is cleared from the stencil mask;
+    /// a collapsed inset therefore naturally becomes the complete expanded
+    /// rectangle. Zero-width, zero-area, or checked derived-rectangle overflow
+    /// contributes no coverage. Ellipse and path clips are rejected by preflight
+    /// until their M9A geometry realization lands; they are never approximated as
+    /// rectangular masks.
     ///
     /// # Errors
     ///
@@ -302,7 +303,14 @@ impl Renderer {
         publication: &PaintPublication,
     ) -> Result<super::OffscreenPublicationReadback, super::OffscreenRenderError> {
         if publication.scene().items().iter().all(|item| {
-            item.clips().is_empty() && matches!(item.primitive(), PaintPrimitive::FillRect { .. })
+            item.clips().is_empty()
+                && matches!(
+                    item.primitive(),
+                    PaintPrimitive::Fill {
+                        shape: SceneShape::Rect(_),
+                        brush: Brush::Solid(_),
+                    }
+                )
         }) {
             return self.base.render_offscreen_publication(publication);
         }
@@ -601,16 +609,16 @@ fn create_clipped_fill_pipeline(
     target_format: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("runenui clipped FillRect shader"),
+        label: Some("runenui clipped solid-rect fill shader"),
         source: wgpu::ShaderSource::Wgsl(super::FILL_RECT_SHADER.into()),
     });
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("runenui clipped FillRect pipeline layout"),
+        label: Some("runenui clipped solid-rect fill pipeline layout"),
         bind_group_layouts: &[],
         immediate_size: 0,
     });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("runenui clipped FillRect pipeline"),
+        label: Some("runenui clipped solid-rect fill pipeline"),
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &shader,
@@ -948,10 +956,11 @@ mod tests {
     };
 
     use runenui_core::{
-        Color, ContributionClip, Element, LogicalLength, LogicalPoint, LogicalRect, LogicalSize,
-        LogicalTransform, NoHostProtocol, PaintContribution, PaintContributionContext,
-        PaintContributionItem, PathFillRule, PathVerb, Radius, ScenePath, SceneShape,
-        StyleEnvironment, UiApp, Widget, WidgetInvalidation, WidgetMeasure, WidgetUpdateContext,
+        Brush, Color, ContributionClip, Element, LogicalLength, LogicalPoint, LogicalRect,
+        LogicalSize, LogicalTransform, NoHostProtocol, PaintContribution,
+        PaintContributionContext, PaintContributionItem, PathFillRule, PathVerb, Radius, ScenePath,
+        SceneShape, StyleEnvironment, UiApp, Widget, WidgetInvalidation, WidgetMeasure,
+        WidgetUpdateContext,
     };
     use runenui_runtime::{
         AppRuntime, LayoutConstraints, PaintPublication, RasterScale, SceneClip,
@@ -1025,6 +1034,10 @@ mod tests {
     fn rect(x: f32, y: f32, width: f32, height: f32) -> LogicalRect {
         LogicalRect::try_new(x, y, width, height)
             .unwrap_or_else(|_| unreachable!("fixture rectangle is valid"))
+    }
+
+    fn fill_rect(rect: LogicalRect, color: Color) -> PaintContributionItem {
+        PaintContributionItem::fill(SceneShape::rect(rect), Brush::solid(color))
     }
 
     fn point(x: f32, y: f32) -> LogicalPoint {
@@ -1128,7 +1141,7 @@ mod tests {
         );
         let transform = LogicalTransform::try_new(1.0, 0.1, 0.25, 1.0, 5.0, 3.0)?;
         let clip = ContributionClip::new(rounded, transform);
-        let mut many = PaintContributionItem::fill_rect(rect(0.0, 0.0, 64.0, 48.0), Color::WHITE);
+        let mut many = fill_rect(rect(0.0, 0.0, 64.0, 48.0), Color::WHITE);
         for _ in 0..300 {
             many = many.with_clip(clip.clone());
         }
@@ -1144,11 +1157,12 @@ mod tests {
         let singular = LogicalTransform::try_new(1.0, 0.0, 0.0, 0.0, 2.0, 1.0)?;
         let singular_publication = publication(
             vec![
-                PaintContributionItem::fill_rect(rect(0.0, 0.0, 64.0, 48.0), Color::WHITE)
-                    .with_clip(ContributionClip::new(
+                fill_rect(rect(0.0, 0.0, 64.0, 48.0), Color::WHITE).with_clip(
+                    ContributionClip::new(
                         SceneShape::rect(rect(0.0, 0.0, 64.0, 48.0)),
                         singular,
-                    )),
+                    ),
+                ),
             ],
             1.0,
         );
@@ -1182,7 +1196,7 @@ mod tests {
         let transform = LogicalTransform::try_new(1.0, 0.25, -0.2, 1.0, 6.0, 4.0)?;
         let publication = publication(
             vec![
-                PaintContributionItem::fill_rect(rect(0.0, 0.0, 64.0, 48.0), Color::WHITE)
+                fill_rect(rect(0.0, 0.0, 64.0, 48.0), Color::WHITE)
                     .with_clip(ContributionClip::new(shape, transform)),
             ],
             2.0,
@@ -1208,10 +1222,9 @@ mod tests {
 
     #[test]
     fn clipped_validator_reuses_primitive_authority_while_base_validator_stays_fail_closed() {
-        let clipped = PaintContributionItem::fill_rect(rect(1.0, 1.0, 10.0, 10.0), Color::WHITE)
-            .with_clip(ContributionClip::identity(SceneShape::rect(rect(
-                2.0, 2.0, 4.0, 4.0,
-            ))));
+        let clipped = fill_rect(rect(1.0, 1.0, 10.0, 10.0), Color::WHITE).with_clip(
+            ContributionClip::identity(SceneShape::rect(rect(2.0, 2.0, 4.0, 4.0))),
+        );
         let publication = publication(vec![clipped], 1.0);
         assert!(validate_clipped_scene_subset(&publication).is_ok());
         assert!(matches!(
@@ -1243,7 +1256,7 @@ mod tests {
         ] {
             let publication = publication(
                 vec![
-                    PaintContributionItem::fill_rect(rect(0.0, 0.0, 20.0, 20.0), Color::WHITE)
+                    fill_rect(rect(0.0, 0.0, 20.0, 20.0), Color::WHITE)
                         .with_clip(ContributionClip::identity(shape)),
                 ],
                 1.0,
@@ -1278,15 +1291,16 @@ mod tests {
         let singular_transform = LogicalTransform::try_new(1.0, 0.0, 0.0, 0.0, 0.0, 0.0)?;
         let publication = publication(
             vec![
-                PaintContributionItem::fill_rect(rect(0.0, 0.0, 64.0, 48.0), background),
-                PaintContributionItem::fill_rect(rect(0.0, 0.0, 64.0, 48.0), clipped_color)
+                fill_rect(rect(0.0, 0.0, 64.0, 48.0), background),
+                fill_rect(rect(0.0, 0.0, 64.0, 48.0), clipped_color)
                     .with_clip(first_clip)
                     .with_clip(second_clip),
-                PaintContributionItem::fill_rect(rect(0.0, 0.0, 64.0, 48.0), singular_color)
-                    .with_clip(ContributionClip::new(
+                fill_rect(rect(0.0, 0.0, 64.0, 48.0), singular_color).with_clip(
+                    ContributionClip::new(
                         SceneShape::rect(rect(0.0, 0.0, 64.0, 48.0)),
                         singular_transform,
-                    )),
+                    ),
+                ),
             ],
             1.3,
         );
