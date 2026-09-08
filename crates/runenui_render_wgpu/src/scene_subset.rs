@@ -154,7 +154,7 @@ pub(crate) const fn validate_literal_rect_item(
 }
 
 const fn supports_literal_rect_stroke(style: StrokeStyle) -> bool {
-    matches!(style.join(), StrokeJoin::Miter) && style.miter_limit() >= 1.414_213_5
+    matches!(style.join(), StrokeJoin::Miter) && style.miter_limit() >= core::f32::consts::SQRT_2
 }
 
 const fn supported_fill_rect(
