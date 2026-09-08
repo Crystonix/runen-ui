@@ -120,7 +120,8 @@ impl Widget<()> for OpacityOwner {
             )
             .with_opacity(half)
             .with_clip(ContributionClip::identity(SceneShape::rounded_rect(
-                rect(), radius,
+                rect(),
+                radius,
             ))),
         ])
     }
