@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+mod image_mapping;
+
 use crate::MountedNodeId;
 use crate::mounted::SurfaceCapabilityPlan;
 use crate::scene::{HitTestRegion, HitTestSceneContent, PaintScene, PaintSceneItem, SceneClip};
@@ -375,7 +377,7 @@ pub(super) fn resolve_paint(
                     mounted_preorder,
                     contribution_local_order,
                     PaintSceneItem::new(
-                        item.primitive().clone(),
+                        image_mapping::publication_primitive(item),
                         local_to_surface,
                         clips,
                         item.opacity(),
