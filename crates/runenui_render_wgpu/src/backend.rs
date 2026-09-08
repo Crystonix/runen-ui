@@ -1637,10 +1637,10 @@ mod tests {
     use image::{ImageEncoder, codecs::png::PngEncoder};
     use runenui_core::{
         Brush, Color, ContributionClip, Element, LogicalLength, LogicalPoint, LogicalRect,
-        LogicalSize, LogicalTransform, NoHostProtocol, PaintContribution,
-        PaintContributionContext, PaintContributionItem, PaintPrimitive, Radius, ResourceKind,
-        ResourceRef, SceneOpacity, SceneShape, StrokeStyle, StyleEnvironment, UiApp, Widget,
-        WidgetInvalidation, WidgetMeasure, WidgetUpdateContext,
+        LogicalSize, LogicalTransform, NoHostProtocol, PaintContribution, PaintContributionContext,
+        PaintContributionItem, PaintPrimitive, Radius, ResourceKind, ResourceRef, SceneOpacity,
+        SceneShape, StrokeStyle, StyleEnvironment, UiApp, Widget, WidgetInvalidation,
+        WidgetMeasure, WidgetUpdateContext,
     };
     use runenui_runtime::{
         AppRuntime, LayoutConstraints, PaintPublication, PumpBudget, RasterScale,
@@ -1860,10 +1860,7 @@ mod tests {
             solid_rect_fill(rect(28.0, 4.0, 6.0, 6.0), case.alpha_and_opacity)
                 .with_opacity(case.half_opacity),
             solid_rect_fill(rect(36.0, 4.0, 6.0, 6.0), case.opaque_background),
-            solid_rect_fill(
-                rect(36.0, 4.0, 6.0, 6.0),
-                case.translucent_foreground,
-            ),
+            solid_rect_fill(rect(36.0, 4.0, 6.0, 6.0), case.translucent_foreground),
             solid_rect_fill(rect(44.0, 4.0, 6.0, 6.0), case.zero_background),
             solid_rect_fill(rect(44.0, 4.0, 6.0, 6.0), case.zero_foreground)
                 .with_opacity(SceneOpacity::TRANSPARENT),
@@ -2246,10 +2243,7 @@ mod tests {
         let foreground = Color::rgba(0xD8, 0x8A, 0x3D, 0x90);
         let publication = publication(
             vec![
-                solid_rect_fill(
-                    rect(8.0, 6.0, 20.0, 12.0),
-                    Color::rgb(0xC3, 0x4A, 0x42),
-                ),
+                solid_rect_fill(rect(8.0, 6.0, 20.0, 12.0), Color::rgb(0xC3, 0x4A, 0x42)),
                 solid_rect_fill(rect(36.0, 6.0, 12.0, 12.0), background),
                 solid_rect_fill(rect(36.0, 6.0, 12.0, 12.0), foreground),
             ],
@@ -2462,10 +2456,7 @@ mod tests {
     -> Result<(), Box<dyn Error>> {
         let affine = LogicalTransform::try_new(1.0, 0.0, 0.5, 1.0, 10.0, 8.0)?;
         let publication = publication(
-            vec![
-                solid_rect_fill(rect(0.0, 0.0, 10.0, 10.0), Color::WHITE)
-                    .with_transform(affine),
-            ],
+            vec![solid_rect_fill(rect(0.0, 0.0, 10.0, 10.0), Color::WHITE).with_transform(affine)],
             1.0,
         );
         let fill_rects = super::validate_scene_subset(&publication)?;
@@ -2499,8 +2490,7 @@ mod tests {
             vec![
                 solid_rect_fill(rect(30.0, 10.0, 10.0, 10.0), Color::WHITE)
                     .with_transform(singular),
-                solid_rect_fill(rect(0.0, 0.0, 10.0, 10.0), Color::WHITE)
-                    .with_transform(extreme),
+                solid_rect_fill(rect(0.0, 0.0, 10.0, 10.0), Color::WHITE).with_transform(extreme),
             ],
             1.0,
         );
@@ -2542,10 +2532,7 @@ mod tests {
     fn fractional_raster_scale_clips_to_exact_canvas_not_rounded_texture_extent()
     -> Result<(), Box<dyn Error>> {
         let publication = publication(
-            vec![solid_rect_fill(
-                rect(60.0, 44.0, 10.0, 10.0),
-                Color::WHITE,
-            )],
+            vec![solid_rect_fill(rect(60.0, 44.0, 10.0, 10.0), Color::WHITE)],
             1.3,
         );
         let fill_rects = super::validate_scene_subset(&publication)?;
@@ -2593,8 +2580,7 @@ mod tests {
 
         let publication = publication(
             vec![
-                solid_rect_fill(rect(0.0, 0.0, 10.0, 10.0), affine_color)
-                    .with_transform(affine),
+                solid_rect_fill(rect(0.0, 0.0, 10.0, 10.0), affine_color).with_transform(affine),
                 solid_rect_fill(rect(30.0, 10.0, 10.0, 10.0), singular_color)
                     .with_transform(singular),
             ],
@@ -2649,9 +2635,7 @@ mod tests {
         );
 
         let publication = publication(
-            vec![
-                solid_rect_fill(rect(0.0, 0.0, 10.0, 10.0), color).with_transform(transform),
-            ],
+            vec![solid_rect_fill(rect(0.0, 0.0, 10.0, 10.0), color).with_transform(transform)],
             1.0,
         );
         let output = renderer.render_offscreen_publication(&publication)?;
@@ -2894,10 +2878,7 @@ mod tests {
             return Ok(());
         };
         let accepted = publication(
-            vec![solid_rect_fill(
-                rect(1.0, 1.0, 4.0, 4.0),
-                Color::WHITE,
-            )],
+            vec![solid_rect_fill(rect(1.0, 1.0, 4.0, 4.0), Color::WHITE)],
             1.0,
         );
         let first = renderer.render_offscreen_publication(&accepted)?;

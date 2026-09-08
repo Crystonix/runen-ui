@@ -207,9 +207,9 @@ mod tests {
 
     use runenui_core::{
         Brush, Color, ContributionClip, Element, LogicalLength, LogicalPoint, LogicalRect,
-        LogicalSize, LogicalTransform, NoHostProtocol, PaintContribution,
-        PaintContributionContext, PaintContributionItem, SceneShape, StrokeStyle, StyleEnvironment,
-        UiApp, Widget, WidgetInvalidation, WidgetMeasure, WidgetUpdateContext,
+        LogicalSize, LogicalTransform, NoHostProtocol, PaintContribution, PaintContributionContext,
+        PaintContributionItem, SceneShape, StrokeStyle, StyleEnvironment, UiApp, Widget,
+        WidgetInvalidation, WidgetMeasure, WidgetUpdateContext,
     };
     use runenui_runtime::{AppRuntime, LayoutConstraints, PaintPublication, SurfaceBuildContext};
 
@@ -361,11 +361,7 @@ mod tests {
                 Color::WHITE,
                 LogicalLength::ZERO,
             ),
-            solid_rect_stroke(
-                rect(10.0, 10.0, 0.0, 12.0),
-                Color::WHITE,
-                length(4.0),
-            ),
+            solid_rect_stroke(rect(10.0, 10.0, 0.0, 12.0), Color::WHITE, length(4.0)),
             solid_rect_stroke(
                 rect(0.0, 0.0, f32::MAX, 1.0),
                 Color::WHITE,
@@ -387,12 +383,8 @@ mod tests {
         let transform = LogicalTransform::try_new(1.0, 0.2, -0.15, 1.0, 6.0, 4.0)?;
         let affine_publication = publication(
             vec![
-                solid_rect_stroke(
-                    rect(10.0, 10.0, 20.0, 12.0),
-                    Color::WHITE,
-                    length(4.0),
-                )
-                .with_transform(transform),
+                solid_rect_stroke(rect(10.0, 10.0, 20.0, 12.0), Color::WHITE, length(4.0))
+                    .with_transform(transform),
             ],
             1.3,
         );
@@ -414,12 +406,8 @@ mod tests {
         let singular = LogicalTransform::try_new(1.0, 0.0, 0.0, 0.0, 2.0, 1.0)?;
         let singular_publication = publication(
             vec![
-                solid_rect_stroke(
-                    rect(10.0, 10.0, 20.0, 12.0),
-                    Color::WHITE,
-                    length(4.0),
-                )
-                .with_transform(singular),
+                solid_rect_stroke(rect(10.0, 10.0, 20.0, 12.0), Color::WHITE, length(4.0))
+                    .with_transform(singular),
             ],
             1.3,
         );
@@ -524,13 +512,9 @@ mod tests {
         let publication = publication(
             vec![
                 solid_rect_fill(rect(0.0, 0.0, 64.0, 48.0), background),
-                solid_rect_stroke(
-                    rect(10.0, 8.0, 20.0, 16.0),
-                    stroke_color,
-                    length(4.0),
-                )
-                .with_transform(stroke_transform)
-                .with_clip(stroke_clip),
+                solid_rect_stroke(rect(10.0, 8.0, 20.0, 16.0), stroke_color, length(4.0))
+                    .with_transform(stroke_transform)
+                    .with_clip(stroke_clip),
                 solid_rect_stroke(collapsed_rect, collapsed_color, length(8.0)),
                 solid_rect_stroke(collapsed_rect, zero_width_color, LogicalLength::ZERO),
             ],
