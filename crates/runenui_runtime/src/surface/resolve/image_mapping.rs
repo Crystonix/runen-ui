@@ -282,14 +282,22 @@ fn normalize_pair(first: f64, second: f64, available: f64) -> (f64, f64) {
 
 #[allow(
     clippy::cast_possible_truncation,
-    reason = "resolved destination edges remain inside an already-validated f32 logical destination; f64 is used only for overflow-safe intermediate mapping arithmetic"
+    reason = "the origin and extent were derived from already-validated f32 logical geometry; f64 is used only for overflow-safe intermediate mapping arithmetic"
 )]
 fn logical_rect_from_edges(x0: f64, y0: f64, x1: f64, y1: f64) -> Option<LogicalRect> {
-    let x0 = x0 as f32;
-    let y0 = y0 as f32;
-    let x1 = x1 as f32;
-    let y1 = y1 as f32;
-    LogicalRect::try_new(x0, y0, x1 - x0, y1 - y0).ok()
+    let width = x1 - x0;
+    let height = y1 - y0;
+    if ![x0, y0, width, height].into_iter().all(f64::is_finite)
+        || width < 0.0
+        || height < 0.0
+    {
+        return None;
+    }
+    let x = x0 as f32;
+    let y = y0 as f32;
+    let width = width.min(f64::from(f32::MAX)) as f32;
+    let height = height.min(f64::from(f32::MAX)) as f32;
+    LogicalRect::try_new(x, y, width, height).ok()
 }
 
 #[cfg(test)]
@@ -301,7 +309,7 @@ mod tests {
         UnitInterval,
     };
 
-    use super::{normalize_pair, publication_primitive, resolve_fit};
+    use super::{logical_rect_from_edges, normalize_pair, publication_primitive, resolve_fit};
 
     fn rect(x: f32, y: f32, width: f32, height: f32) -> LogicalRect {
         LogicalRect::try_new(x, y, width, height)
@@ -473,6 +481,17 @@ mod tests {
         let huge = f64::from(f32::MAX);
         let (first, second) = normalize_pair(huge, huge, 10.0);
         assert_eq!((first, second), (5.0, 5.0));
+    }
+
+    #[test]
+    fn destination_reconstruction_keeps_finite_extent_when_far_edge_exceeds_f32() {
+        let x = f64::from(f32::MAX) / 2.0;
+        let width = f64::from(f32::MAX);
+        let resolved = logical_rect_from_edges(x, 0.0, x + width, 1.0)
+            .unwrap_or_else(|| unreachable!("finite logical origin and extent remain representable"));
+        assert!(resolved.x().is_finite());
+        assert_eq!(resolved.width(), f32::MAX);
+        assert_eq!(resolved.height(), 1.0);
     }
 
     #[test]
