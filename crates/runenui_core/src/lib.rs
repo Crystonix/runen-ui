@@ -253,6 +253,7 @@ mod subscription;
 mod typography;
 mod value;
 mod visual;
+mod visual_style;
 mod widget_context;
 mod widget_erasure;
 mod widget_mapping;
@@ -374,8 +375,11 @@ pub use visual::{
     Brush, DropShadow, GradientGeometryError, GradientStop, GradientStops, GradientStopsError,
     ImageAlignment, ImageCrop, ImageCropError, ImageDescriptor, ImageDestinationInsets, ImageFit,
     ImageIntrinsicSize, ImageMapping, ImageMappingError, ImagePaintDescriptor, ImageSourceInsets,
-    ImageSourceInsetsError, LinearGradient, NonFiniteVisualScalar, RadialGradient, StrokeCap,
-    StrokeJoin, StrokeStyle, StrokeStyleError, UnitInterval, UnitIntervalError,
+    ImageSourceInsetsError, LinearGradient, NonFiniteVisualScalar, Outline, RadialGradient,
+    StrokeCap, StrokeJoin, StrokeStyle, StrokeStyleError, UnitInterval, UnitIntervalError,
+};
+pub use visual_style::{
+    OpacityToken, OpacityValue, OutlineToken, OutlineValue, ShadowToken, ShadowValue,
 };
 pub use widget_context::{
     WidgetActivationContext, WidgetInvalidation, WidgetMountContext, WidgetUnmountContext,
