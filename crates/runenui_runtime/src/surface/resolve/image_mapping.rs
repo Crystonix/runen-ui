@@ -69,10 +69,6 @@ fn resolve_image(descriptor: &ImagePaintDescriptor) -> ImagePrimitive {
 }
 
 #[allow(
-    clippy::cast_precision_loss,
-    reason = "intrinsic u32 pixel extents become finite neutral f32 source geometry only at the runtime publication boundary"
-)]
-#[allow(
     clippy::too_many_arguments,
     reason = "the pure image mapping helper keeps every authored source/alignment/fit input explicit"
 )]
@@ -87,20 +83,28 @@ fn resolve_fit(
     align_y: f32,
     fit: ImageFit,
     destination: LogicalRect,
-) -> Vec<([f32; 4], LogicalRect)> {
+) -> Vec<([f64; 4], LogicalRect)> {
     if destination.width() == 0.0 || destination.height() == 0.0 {
         return Vec::new();
     }
 
-    let intrinsic_width = intrinsic_width as f32;
-    let intrinsic_height = intrinsic_height as f32;
+    let intrinsic_width = f64::from(intrinsic_width);
+    let intrinsic_height = f64::from(intrinsic_height);
+    let crop_x = f64::from(crop_x);
+    let crop_y = f64::from(crop_y);
+    let crop_width = f64::from(crop_width);
+    let crop_height = f64::from(crop_height);
     let source_x = intrinsic_width * crop_x;
     let source_y = intrinsic_height * crop_y;
-    let source_width = intrinsic_width * crop_width;
-    let source_height = intrinsic_height * crop_height;
+    let source_x1 = intrinsic_width * (crop_x + crop_width);
+    let source_y1 = intrinsic_height * (crop_y + crop_height);
+    let source_width = source_x1 - source_x;
+    let source_height = source_y1 - source_y;
 
-    let destination_width = destination.width();
-    let destination_height = destination.height();
+    let destination_x = f64::from(destination.x());
+    let destination_y = f64::from(destination.y());
+    let destination_width = f64::from(destination.width());
+    let destination_height = f64::from(destination.height());
     let (rendered_width, rendered_height) = match fit {
         ImageFit::Fill => (destination_width, destination_height),
         ImageFit::Contain => {
@@ -123,40 +127,42 @@ fn resolve_fit(
         }
     };
 
-    let rendered_x = destination.x() + (destination_width - rendered_width) * align_x;
-    let rendered_y = destination.y() + (destination_height - rendered_height) * align_y;
-    let visible_x0 = destination.x().max(rendered_x);
-    let visible_y0 = destination.y().max(rendered_y);
-    let visible_x1 = (destination.x() + destination_width).min(rendered_x + rendered_width);
-    let visible_y1 = (destination.y() + destination_height).min(rendered_y + rendered_height);
+    let align_x = f64::from(align_x);
+    let align_y = f64::from(align_y);
+    let rendered_x = destination_x + (destination_width - rendered_width) * align_x;
+    let rendered_y = destination_y + (destination_height - rendered_height) * align_y;
+    let visible_x0 = destination_x.max(rendered_x);
+    let visible_y0 = destination_y.max(rendered_y);
+    let visible_x1 = (destination_x + destination_width).min(rendered_x + rendered_width);
+    let visible_y1 = (destination_y + destination_height).min(rendered_y + rendered_height);
     if visible_x1 <= visible_x0 || visible_y1 <= visible_y0 {
         return Vec::new();
     }
 
-    let u0 = (visible_x0 - rendered_x) / rendered_width;
-    let v0 = (visible_y0 - rendered_y) / rendered_height;
-    let u1 = (visible_x1 - rendered_x) / rendered_width;
-    let v1 = (visible_y1 - rendered_y) / rendered_height;
+    let u0 = ((visible_x0 - rendered_x) / rendered_width).clamp(0.0, 1.0);
+    let v0 = ((visible_y0 - rendered_y) / rendered_height).clamp(0.0, 1.0);
+    let u1 = ((visible_x1 - rendered_x) / rendered_width).clamp(0.0, 1.0);
+    let v1 = ((visible_y1 - rendered_y) / rendered_height).clamp(0.0, 1.0);
+    let source_visible_x0 = source_x + source_width * u0;
+    let source_visible_y0 = source_y + source_height * v0;
+    let source_visible_x1 = source_x + source_width * u1;
+    let source_visible_y1 = source_y + source_height * v1;
     let source = [
-        source_x + source_width * u0,
-        source_y + source_height * v0,
-        source_width * (u1 - u0),
-        source_height * (v1 - v0),
+        source_visible_x0,
+        source_visible_y0,
+        source_visible_x1 - source_visible_x0,
+        source_visible_y1 - source_visible_y0,
     ];
-    let visible = LogicalRect::try_new(
-        visible_x0,
-        visible_y0,
-        visible_x1 - visible_x0,
-        visible_y1 - visible_y0,
-    )
-    .unwrap_or_else(|_| unreachable!("resolved visible image destination remains finite"));
+    let Some(visible) = logical_rect_from_edges(visible_x0, visible_y0, visible_x1, visible_y1)
+    else {
+        return Vec::new();
+    };
+    if visible.width() == 0.0 || visible.height() == 0.0 {
+        return Vec::new();
+    }
     vec![(source, visible)]
 }
 
-#[allow(
-    clippy::cast_precision_loss,
-    reason = "intrinsic u32 pixel extents become finite neutral f32 source geometry only at the runtime publication boundary"
-)]
 #[allow(
     clippy::too_many_arguments,
     reason = "the pure nine-slice helper keeps the exact authored source and destination edge facts explicit"
@@ -171,54 +177,58 @@ fn resolve_nine_slice(
     source_insets: [f32; 4],
     destination_insets: [f32; 4],
     destination: LogicalRect,
-) -> Vec<([f32; 4], LogicalRect)> {
+) -> Vec<([f64; 4], LogicalRect)> {
     if destination.width() == 0.0 || destination.height() == 0.0 {
         return Vec::new();
     }
 
-    let intrinsic_width = intrinsic_width as f32;
-    let intrinsic_height = intrinsic_height as f32;
+    let intrinsic_width = f64::from(intrinsic_width);
+    let intrinsic_height = f64::from(intrinsic_height);
+    let crop_x = f64::from(crop_x);
+    let crop_y = f64::from(crop_y);
+    let crop_width = f64::from(crop_width);
+    let crop_height = f64::from(crop_height);
     let source_x = intrinsic_width * crop_x;
     let source_y = intrinsic_height * crop_y;
-    let source_width = intrinsic_width * crop_width;
-    let source_height = intrinsic_height * crop_height;
-    let [source_top, source_right, source_bottom, source_left] = source_insets;
+    let source_x1 = intrinsic_width * (crop_x + crop_width);
+    let source_y1 = intrinsic_height * (crop_y + crop_height);
+    let source_width = source_x1 - source_x;
+    let source_height = source_y1 - source_y;
+    let [source_top, source_right, source_bottom, source_left] = source_insets.map(f64::from);
     let [destination_top, destination_right, destination_bottom, destination_left] =
-        destination_insets;
-    let (destination_left, destination_right) = normalize_pair(
-        destination_left,
-        destination_right,
-        destination.width(),
-    );
-    let (destination_top, destination_bottom) = normalize_pair(
-        destination_top,
-        destination_bottom,
-        destination.height(),
-    );
+        destination_insets.map(f64::from);
+    let destination_width = f64::from(destination.width());
+    let destination_height = f64::from(destination.height());
+    let (destination_left, destination_right) =
+        normalize_pair(destination_left, destination_right, destination_width);
+    let (destination_top, destination_bottom) =
+        normalize_pair(destination_top, destination_bottom, destination_height);
 
     let source_xs = [
         source_x,
         source_x + source_left,
-        source_x + source_width - source_right,
-        source_x + source_width,
+        source_x1 - source_right,
+        source_x1,
     ];
     let source_ys = [
         source_y,
         source_y + source_top,
-        source_y + source_height - source_bottom,
-        source_y + source_height,
+        source_y1 - source_bottom,
+        source_y1,
     ];
+    let destination_x = f64::from(destination.x());
+    let destination_y = f64::from(destination.y());
     let destination_xs = [
-        destination.x(),
-        destination.x() + destination_left,
-        destination.x() + destination.width() - destination_right,
-        destination.x() + destination.width(),
+        destination_x,
+        destination_x + destination_left,
+        destination_x + destination_width - destination_right,
+        destination_x + destination_width,
     ];
     let destination_ys = [
-        destination.y(),
-        destination.y() + destination_top,
-        destination.y() + destination.height() - destination_bottom,
-        destination.y() + destination.height(),
+        destination_y,
+        destination_y + destination_top,
+        destination_y + destination_height - destination_bottom,
+        destination_y + destination_height,
     ];
 
     let mut patches = Vec::with_capacity(9);
@@ -235,13 +245,17 @@ fn resolve_nine_slice(
             {
                 continue;
             }
-            let destination_patch = LogicalRect::try_new(
+            let Some(destination_patch) = logical_rect_from_edges(
                 destination_xs[column],
                 destination_ys[row],
-                destination_patch_width,
-                destination_patch_height,
-            )
-            .unwrap_or_else(|_| unreachable!("resolved nine-slice destination remains finite"));
+                destination_xs[column + 1],
+                destination_ys[row + 1],
+            ) else {
+                continue;
+            };
+            if destination_patch.width() == 0.0 || destination_patch.height() == 0.0 {
+                continue;
+            }
             patches.push((
                 [
                     source_xs[column],
@@ -256,7 +270,7 @@ fn resolve_nine_slice(
     patches
 }
 
-fn normalize_pair(first: f32, second: f32, available: f32) -> (f32, f32) {
+fn normalize_pair(first: f64, second: f64, available: f64) -> (f64, f64) {
     let sum = first + second;
     if sum <= available || sum == 0.0 {
         (first, second)
@@ -264,6 +278,18 @@ fn normalize_pair(first: f32, second: f32, available: f32) -> (f32, f32) {
         let scale = available / sum;
         (first * scale, second * scale)
     }
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "resolved destination edges remain inside an already-validated f32 logical destination; f64 is used only for overflow-safe intermediate mapping arithmetic"
+)]
+fn logical_rect_from_edges(x0: f64, y0: f64, x1: f64, y1: f64) -> Option<LogicalRect> {
+    let x0 = x0 as f32;
+    let y0 = y0 as f32;
+    let x1 = x1 as f32;
+    let y1 = y1 as f32;
+    LogicalRect::try_new(x0, y0, x1 - x0, y1 - y0).ok()
 }
 
 #[cfg(test)]
@@ -275,7 +301,7 @@ mod tests {
         UnitInterval,
     };
 
-    use super::publication_primitive;
+    use super::{normalize_pair, publication_primitive, resolve_fit};
 
     fn rect(x: f32, y: f32, width: f32, height: f32) -> LogicalRect {
         LogicalRect::try_new(x, y, width, height)
@@ -423,6 +449,30 @@ mod tests {
             image.resolved_patch(3),
             Some(([80.0, 40.0, 20.0, 10.0], rect(20.0, 10.0, 20.0, 10.0)))
         );
+    }
+
+    #[test]
+    fn large_intrinsic_extent_is_not_narrowed_before_publication() {
+        let patches = resolve_fit(
+            16_777_217,
+            1,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            0.5,
+            0.5,
+            ImageFit::Fill,
+            rect(0.0, 0.0, 1.0, 1.0),
+        );
+        assert_eq!(patches[0].0, [0.0, 0.0, 16_777_217.0, 1.0]);
+    }
+
+    #[test]
+    fn destination_inset_normalization_uses_overflow_safe_wider_arithmetic() {
+        let huge = f64::from(f32::MAX);
+        let (first, second) = normalize_pair(huge, huge, 10.0);
+        assert_eq!((first, second), (5.0, 5.0));
     }
 
     #[test]
