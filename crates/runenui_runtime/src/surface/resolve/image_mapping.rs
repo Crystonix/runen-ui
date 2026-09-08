@@ -192,8 +192,6 @@ fn resolve_nine_slice(
     let source_y = intrinsic_height * crop_y;
     let source_x1 = intrinsic_width * (crop_x + crop_width);
     let source_y1 = intrinsic_height * (crop_y + crop_height);
-    let source_width = source_x1 - source_x;
-    let source_height = source_y1 - source_y;
     let [source_top, source_right, source_bottom, source_left] = source_insets.map(f64::from);
     let [
         destination_top,
