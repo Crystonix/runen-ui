@@ -13,6 +13,7 @@ const RENDERER_BACKEND_SOURCE: &str = "crates/runenui_render_wgpu/src/backend.rs
 const ALLOWED_CORE_IDENTIFIERS: &[&str] = &[
     "Brush",
     "Color",
+    "ImageIntrinsicSize",
     "ImagePrimitive",
     "LogicalLength",
     "LogicalPoint",
