@@ -134,7 +134,12 @@ pub(crate) const fn validate_literal_rect_item(
                     UnsupportedSceneSemantic::StrokeStyle,
                 ));
             }
-            Ok(supported_stroke_rect(item, *rect, *color, style.width().get()))
+            Ok(supported_stroke_rect(
+                item,
+                *rect,
+                *color,
+                style.width().get(),
+            ))
         }
         PaintPrimitive::Image(_) => Err(unsupported(item_index, UnsupportedSceneSemantic::Image)),
         PaintPrimitive::ShapedTextRun(_) => Err(unsupported(
@@ -149,7 +154,7 @@ pub(crate) const fn validate_literal_rect_item(
 }
 
 const fn supports_literal_rect_stroke(style: StrokeStyle) -> bool {
-    style.join() == StrokeJoin::Miter && style.miter_limit() >= 1.414_213_5
+    matches!(style.join(), StrokeJoin::Miter) && style.miter_limit() >= 1.414_213_5
 }
 
 const fn supported_fill_rect(
@@ -210,10 +215,7 @@ pub(crate) const fn validate_fill_rect_item(
     item: &PaintSceneItem,
 ) -> Result<SupportedFillRect, SceneValidationError> {
     if matches!(item.primitive(), PaintPrimitive::Stroke { .. }) {
-        return Err(unsupported(
-            item_index,
-            UnsupportedSceneSemantic::Stroke,
-        ));
+        return Err(unsupported(item_index, UnsupportedSceneSemantic::Stroke));
     }
     match validate_literal_rect_item(item_index, item) {
         Ok(Some(literal)) => Ok(literal.fill),

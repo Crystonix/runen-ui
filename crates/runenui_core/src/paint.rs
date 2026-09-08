@@ -386,7 +386,7 @@ impl PaintPrimitive {
 
 #[cfg(test)]
 mod tests {
-    use super::{PaintContribution, PaintContributionItem, PaintPrimitive};
+    use super::{ImagePrimitive, PaintContribution, PaintContributionItem, PaintPrimitive};
     use crate::{
         Brush, Color, ContributionClip, LogicalLength, LogicalPoint, LogicalRect, LogicalTransform,
         ResourceKind, ResourceKindMismatch, ResourceRef, SceneLayer, SceneOpacity, SceneShape,
@@ -428,8 +428,14 @@ mod tests {
             contribution.items()[0].primitive().shape(),
             Some(&SceneShape::rect(first_rect))
         );
-        assert_eq!(contribution.items()[0].primitive().brush(), Some(&first_brush));
-        assert_eq!(contribution.items()[1].primitive().stroke_style(), Some(stroke));
+        assert_eq!(
+            contribution.items()[0].primitive().brush(),
+            Some(&first_brush)
+        );
+        assert_eq!(
+            contribution.items()[1].primitive().stroke_style(),
+            Some(stroke)
+        );
     }
 
     #[test]
@@ -465,7 +471,10 @@ mod tests {
 
         assert_eq!(image.primitive().resource_ref(), Some(&image_ref));
         assert_eq!(
-            image.primitive().as_image().map(ImagePrimitive::destination),
+            image
+                .primitive()
+                .as_image()
+                .map(ImagePrimitive::destination),
             Some(rect)
         );
         assert_eq!(run.primitive().resource_ref(), Some(&shaped_ref));
@@ -504,10 +513,8 @@ mod tests {
     fn item_composition_defaults_and_explicit_values_are_self_contained() {
         let rect = LogicalRect::try_new(0.0, 0.0, 4.0, 5.0)
             .unwrap_or_else(|_| unreachable!("test rectangle is valid"));
-        let default_item = PaintContributionItem::fill(
-            SceneShape::rect(rect),
-            Brush::solid(Color::WHITE),
-        );
+        let default_item =
+            PaintContributionItem::fill(SceneShape::rect(rect), Brush::solid(Color::WHITE));
         assert_eq!(default_item.local_transform(), LogicalTransform::IDENTITY);
         assert!(default_item.clips().is_empty());
         assert_eq!(default_item.opacity(), SceneOpacity::OPAQUE);
