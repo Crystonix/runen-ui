@@ -39,40 +39,58 @@ pub enum UnsupportedShapedGlyphKind {
 /// Structured failure while realizing one retained paint publication.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PublicationRenderError {
+    /// Existing renderer/device/target/readback failure.
     Backend(OffscreenRenderError),
+    /// Caller-owned logical resource resolution failed before target mutation.
     Resource {
         item_index: usize,
         error: ResourceResolveError,
     },
+    /// An otherwise valid image payload exceeds this renderer device's texture limit.
     ImageExtentExceedsDeviceLimit {
         item_index: usize,
         width: u32,
         height: u32,
         max_texture_dimension_2d: u32,
     },
+    /// The tightly packed RGBA8 row byte count cannot be represented by wgpu's upload layout.
     ImageRowBytesOverflow { item_index: usize, width: u32 },
+    /// An otherwise valid glyph field exceeds this renderer device's texture limit.
     ShapedGlyphExtentExceedsDeviceLimit {
         item_index: usize,
         width: u32,
         height: u32,
         max_texture_dimension_2d: u32,
     },
+    /// The publication did not retain the exact immutable logical shaped resource.
     ShapedTextResourceUnavailable { item_index: usize },
+    /// The exact shaped glyph uses a source this outline-only realization does not support.
     UnsupportedShapedGlyph {
         item_index: usize,
         glyph_id: u32,
         kind: UnsupportedShapedGlyphKind,
     },
+    /// The retained font bytes or face index cannot be read as a font.
     ShapedTextFontInvalid { item_index: usize },
+    /// The exact retained outline could not be converted into a valid MSDF shape.
     ShapedTextOutlineInvalid { item_index: usize, glyph_id: u32 },
+    /// This renderer was not constructed with a native surface target.
     SurfaceUnavailable,
+    /// A retained native surface exists but has not been configured with a non-zero extent.
     SurfaceNotConfigured,
+    /// Renderer-local surface target generations cannot advance without wrapping.
     SurfaceTargetGenerationExhausted,
+    /// The presentation engine could not provide a frame before its timeout boundary.
     SurfaceTimeout,
+    /// The native surface is currently occluded and should be retried later.
     SurfaceOccluded,
+    /// The native surface configuration is outdated and must be configured again.
     SurfaceOutdated,
+    /// The native surface was lost and the host must recreate the renderer/surface target.
     SurfaceLost,
+    /// The acquired surface texture is usable but no longer matches the native surface optimally.
     SurfaceSuboptimal,
+    /// Surface acquisition encountered a validation failure.
     SurfaceValidation,
 }
 
@@ -212,6 +230,13 @@ impl PublicationRenderError {
     }
 }
 
+/// Canonical provider-aware renderer facade.
+///
+/// The already-proven literal renderer remains private implementation machinery
+/// and continues to own the single wgpu instance/device/queue/target/lineage.
+/// External image upload, bind groups, and sampled textures are disposable child
+/// caches keyed only by the complete opaque `ResourceRef`; shaped text is resolved
+/// directly from the publication's retained logical resource.
 #[derive(Debug)]
 pub struct ResourceRenderer {
     literal: Renderer,
@@ -223,10 +248,20 @@ pub struct ResourceRenderer {
 }
 
 impl ResourceRenderer {
+    /// Selects a native adapter and creates a renderer-owned wgpu device and queue.
+    ///
+    /// # Errors
+    ///
+    /// Returns structured backend, adapter, or device diagnostics when construction fails.
     pub async fn request(options: RendererOptions) -> Result<Self, RendererInitError> {
         Renderer::request(options).await.map(Self::from_literal)
     }
 
+    /// Selects a native adapter using a caller-owned display connection.
+    ///
+    /// # Errors
+    ///
+    /// Returns structured backend, adapter, or device diagnostics when construction fails.
     pub async fn request_with_display_handle(
         options: RendererOptions,
         display: Box<dyn WgpuHasDisplayHandle>,
@@ -236,6 +271,12 @@ impl ResourceRenderer {
             .map(Self::from_literal)
     }
 
+    /// Creates and retains a native surface before selecting a compatible adapter.
+    ///
+    /// # Errors
+    ///
+    /// Returns structured surface-creation, compatible-adapter, target-format, or
+    /// device diagnostics when construction fails.
     pub async fn request_with_surface_target(
         options: RendererOptions,
         display: Box<dyn WgpuHasDisplayHandle>,
@@ -259,31 +300,47 @@ impl ResourceRenderer {
         }
     }
 
+    /// Returns immutable instance, adapter, device, and target diagnostics.
     #[must_use]
     pub const fn diagnostics(&self) -> &RendererDiagnostics {
         self.literal.diagnostics()
     }
 
+    /// Returns the immutable observation for the most recent publication attempt.
     #[must_use]
     pub const fn last_observation(&self) -> Option<&crate::PublicationObservation> {
         self.literal.last_observation()
     }
 
+    /// Returns whether construction retained an actual native surface target.
     #[must_use]
     pub const fn has_surface(&self) -> bool {
         self.literal.has_surface()
     }
 
+    /// Returns the exact configured native surface extent, when configured.
     #[must_use]
     pub const fn configured_surface_extent(&self) -> Option<OffscreenExtent> {
         self.surface_extent
     }
 
+    /// Returns the renderer-local generation of the current native surface configuration.
     #[must_use]
     pub const fn surface_target_generation(&self) -> u64 {
         self.surface_target_generation
     }
 
+    /// Configures the retained native surface for one non-zero physical extent.
+    ///
+    /// Reconfiguration creates a new renderer-local target generation and forgets
+    /// successful surface-publication lineage. Resource uploads remain disposable
+    /// renderer state and may be reused across target recreation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when no native surface exists, the extent is
+    /// invalid for the selected device, or the renderer cannot allocate another
+    /// target generation.
     pub fn configure_surface(
         &mut self,
         width: u32,
@@ -322,11 +379,16 @@ impl ResourceRenderer {
         Ok(extent)
     }
 
+    /// Drops the retained offscreen target and every publication realization tied to it.
     #[must_use]
     pub fn discard_offscreen_target(&mut self) -> bool {
         self.literal.discard_offscreen_target()
     }
 
+    /// Drops renderer-owned uploaded resource realizations without changing logical refs.
+    ///
+    /// A real cache loss also invalidates successful publication lineage so the
+    /// next complete publication is reconstructed with a full resync on every target.
     #[must_use]
     pub fn discard_resource_cache(&mut self) -> bool {
         let images_discarded = self.images.discard_cache();
@@ -341,6 +403,18 @@ impl ResourceRenderer {
         discarded
     }
 
+    /// Renders one complete publication and reads actual GPU bytes.
+    ///
+    /// Publications without provider-backed resources delegate to the already-proven
+    /// literal renderer. Resource-bearing publications preserve exact scene order across
+    /// fills, centered strokes, images, and shaped runs; payload resolution completes
+    /// before retained-target mutation.
+    ///
+    /// # Errors
+    ///
+    /// Returns deterministic scene, resource, image-limit, target, device, or
+    /// readback failures. A missing/unavailable/malformed provider result never
+    /// mutates the retained target.
     #[allow(
         clippy::too_many_lines,
         reason = "the provider-backed render transaction intentionally keeps complete validation and resource preflight before target mutation, then ordered realization/submission/readback, and only then lineage/cache commit in one auditable sequence"
@@ -604,6 +678,29 @@ impl ResourceRenderer {
         })
     }
 
+    /// Renders one complete provider-backed publication directly into the configured
+    /// native surface and schedules that exact texture for presentation.
+    ///
+    /// The configured surface extent is the exact native physical target authority.
+    /// Publication logical size and raster scale define only the continuous raster-space
+    /// canvas; they are never multiplied back into an integer native extent. This avoids
+    /// introducing a second, float-rounded version of the host-owned physical mapping.
+    /// Surface and offscreen targets keep independent successful-publication lineage.
+    /// A swapchain image is always rendered completely because an `AlreadyCurrent`
+    /// classification describes logical renderer state, not the contents of the newly
+    /// acquired native image. Resource preflight still completes before acquisition.
+    /// After GPU submission, `before_present` is invoked exactly once immediately before
+    /// native presentation so the caller can perform host-specific pre-present work
+    /// without exposing native host types to the renderer. Successful surface lineage
+    /// advances only after `Queue::present` is called.
+    ///
+    /// # Errors
+    ///
+    /// Returns deterministic publication/resource/backend failures plus structured
+    /// native-surface recovery states. Timeout and occlusion may be retried later;
+    /// outdated/suboptimal targets should be reconfigured; a lost surface requires
+    /// recreating the renderer from the host-owned window target. `before_present` is
+    /// not invoked for failures that occur before successful GPU submission.
     #[allow(
         clippy::too_many_lines,
         reason = "the native surface transaction keeps validation/resource preflight, target acquisition, the shared mixed-scene encoder, submission, the caller-owned pre-present boundary, present, and successful-lineage commit in one auditable sequence"
@@ -768,7 +865,7 @@ impl ResourceRenderer {
             self.literal
                 .clip_pipelines
                 .get(&target_format)
-                .unwrap_or_else(|| unreachable!("literal mask pipelines are cached"))
+                .unwrap_or_else(|| unreachable!("native literal mask pipelines are cached"))
         });
         let mut encoder =
             self.literal
@@ -937,7 +1034,6 @@ impl ResourceRenderer {
                 Err(shaped::ShapedRunResolveFailure::InvalidOutline { glyph_id }) => {
                     return Err(PublicationRenderError::ShapedTextOutlineInvalid {
                         item_index: item.shaped_run.item_index,
-                        glyph_id,
                     });
                 }
                 Err(shaped::ShapedRunResolveFailure::GlyphExtentExceedsDeviceLimit {
@@ -960,6 +1056,11 @@ impl ResourceRenderer {
         Ok(resolved)
     }
 
+    /// Executes one real wgpu render-pass clear and returns actual GPU bytes from GPU readback.
+    ///
+    /// # Errors
+    ///
+    /// Returns structured extent, device-wait, buffer-map, or mapped-range failures.
     pub fn clear_offscreen(
         &self,
         extent: OffscreenExtent,
@@ -1392,11 +1493,14 @@ fn encode_resource_image_item(
         return;
     }
     let vertex_count = u32::try_from(vertex_bytes.len() / 20).unwrap_or(u32::MAX);
-    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("runenui ordered mixed-scene image vertices"),
-        contents: &vertex_bytes,
-        usage: wgpu::BufferUsages::VERTEX,
-    });
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::DeviceExt::create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("runenui ordered mixed-scene image vertices"),
+            contents: &vertex_bytes,
+            usage: wgpu::BufferUsages::VERTEX,
+        },
+    ));
 
     if item.clips.is_empty() {
         image_renderer.draw(
