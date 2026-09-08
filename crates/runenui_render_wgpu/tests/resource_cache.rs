@@ -9,10 +9,10 @@ use std::{
 };
 
 use runenui_core::{
-    Brush, Color, Element, ImageDescriptor, ImageIntrinsicSize, ImageMapping,
-    ImagePaintDescriptor, LogicalLength, LogicalRect, LogicalSize, NoHostProtocol,
-    PaintContribution, PaintContributionContext, PaintContributionItem, ResourceKind, ResourceRef,
-    SceneShape, StyleEnvironment, UiApp, Widget, WidgetMeasure, WidgetUpdateContext,
+    Brush, Color, Element, ImageDescriptor, ImageIntrinsicSize, ImageMapping, ImagePaintDescriptor,
+    LogicalLength, LogicalRect, LogicalSize, NoHostProtocol, PaintContribution,
+    PaintContributionContext, PaintContributionItem, ResourceKind, ResourceRef, SceneShape,
+    StyleEnvironment, UiApp, Widget, WidgetMeasure, WidgetUpdateContext,
 };
 use runenui_render_wgpu::{
     BackendSelection, ImagePayload, PublicationRenderError, PublicationUpdateMode, Renderer,
@@ -187,15 +187,25 @@ fn resource_cache_loss_forces_full_resync_and_reloads_before_repaint() -> Result
     let image_publication = publication(vec![image]);
 
     let first = renderer.render_offscreen_publication(&image_publication, &provider)?;
-    assert_eq!(first.update_plan().mode(), PublicationUpdateMode::FullResync);
+    assert_eq!(
+        first.update_plan().mode(),
+        PublicationUpdateMode::FullResync
+    );
     let generation = first.target_generation();
     assert_eq!(provider.loads(), 1);
     assert_eq!(pixel(first.readback(), 4, 4), IMAGE_RGBA);
 
     let current = renderer.render_offscreen_publication(&image_publication, &provider)?;
-    assert_eq!(current.update_plan().mode(), PublicationUpdateMode::AlreadyCurrent);
+    assert_eq!(
+        current.update_plan().mode(),
+        PublicationUpdateMode::AlreadyCurrent
+    );
     assert_eq!(current.target_generation(), generation);
-    assert_eq!(provider.loads(), 1, "already-current rendering reuses the cache");
+    assert_eq!(
+        provider.loads(),
+        1,
+        "already-current rendering reuses the cache"
+    );
 
     assert!(renderer.discard_resource_cache());
     provider.set_available(false);
@@ -215,7 +225,10 @@ fn resource_cache_loss_forces_full_resync_and_reloads_before_repaint() -> Result
 
     provider.set_available(true);
     let rebuilt = renderer.render_offscreen_publication(&image_publication, &provider)?;
-    assert_eq!(rebuilt.update_plan().mode(), PublicationUpdateMode::FullResync);
+    assert_eq!(
+        rebuilt.update_plan().mode(),
+        PublicationUpdateMode::FullResync
+    );
     assert_eq!(
         rebuilt.target_generation(),
         generation,
