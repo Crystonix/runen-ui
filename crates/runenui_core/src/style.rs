@@ -1,7 +1,7 @@
 //! Validated host-neutral authored style vocabulary.
 
 use crate::{
-    IdentifierError, LogicalLength, Typography,
+    Brush, IdentifierError, LogicalLength, Typography,
     identity::{IdentifierText, validate_identifier},
 };
 
@@ -80,6 +80,7 @@ macro_rules! define_token_ref {
 }
 
 define_token_ref!(ColorToken, "Typed color-token reference.");
+define_token_ref!(BrushToken, "Typed brush-token reference.");
 define_token_ref!(SpacingToken, "Typed edge-spacing-token reference.");
 define_token_ref!(RadiusToken, "Typed corner-radius-token reference.");
 define_token_ref!(TypographyToken, "Typed metric-typography-token reference.");
@@ -211,6 +212,55 @@ impl From<Color> for ColorValue {
 }
 impl From<ColorToken> for ColorValue {
     fn from(value: ColorToken) -> Self {
+        Self::Token(value)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum BrushValue {
+    Literal(Brush),
+    Token(BrushToken),
+}
+
+impl BrushValue {
+    #[must_use]
+    pub const fn literal(value: Brush) -> Self {
+        Self::Literal(value)
+    }
+    #[must_use]
+    pub const fn token(token: BrushToken) -> Self {
+        Self::Token(token)
+    }
+    #[must_use]
+    pub const fn as_literal(&self) -> Option<&Brush> {
+        if let Self::Literal(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
+    #[must_use]
+    pub const fn as_token(&self) -> Option<&BrushToken> {
+        if let Self::Token(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
+}
+
+impl From<Brush> for BrushValue {
+    fn from(value: Brush) -> Self {
+        Self::Literal(value)
+    }
+}
+impl From<Color> for BrushValue {
+    fn from(value: Color) -> Self {
+        Self::Literal(Brush::solid(value))
+    }
+}
+impl From<BrushToken> for BrushValue {
+    fn from(value: BrushToken) -> Self {
         Self::Token(value)
     }
 }
@@ -462,7 +512,7 @@ impl From<TypographyToken> for TypographyValue {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct StyleProperties {
     foreground: Option<ColorValue>,
-    background: Option<ColorValue>,
+    background: Option<BrushValue>,
     padding: Option<SpacingValue>,
     radius: Option<RadiusValue>,
     typography: Option<TypographyValue>,
@@ -491,7 +541,7 @@ impl StyleProperties {
         self
     }
     #[must_use]
-    pub fn with_background(mut self, value: impl Into<ColorValue>) -> Self {
+    pub fn with_background(mut self, value: impl Into<BrushValue>) -> Self {
         self.background = Some(value.into());
         self
     }
@@ -515,7 +565,7 @@ impl StyleProperties {
         self.foreground.as_ref()
     }
     #[must_use]
-    pub const fn background(&self) -> Option<&ColorValue> {
+    pub const fn background(&self) -> Option<&BrushValue> {
         self.background.as_ref()
     }
     #[must_use]
@@ -571,7 +621,7 @@ impl StyleIntent {
         self
     }
     #[must_use]
-    pub fn with_background(mut self, value: impl Into<ColorValue>) -> Self {
+    pub fn with_background(mut self, value: impl Into<BrushValue>) -> Self {
         self.overrides = self.overrides.with_background(value);
         self
     }
@@ -607,7 +657,7 @@ impl StyleIntent {
         self.overrides.foreground()
     }
     #[must_use]
-    pub const fn background(&self) -> Option<&ColorValue> {
+    pub const fn background(&self) -> Option<&BrushValue> {
         self.overrides.background()
     }
     #[must_use]
