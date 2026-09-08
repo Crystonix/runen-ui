@@ -80,7 +80,7 @@ impl PaintContribution {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ResolvedImagePatch {
-    source: [f32; 4],
+    source: [f64; 4],
     destination: LogicalRect,
 }
 
@@ -125,7 +125,7 @@ impl ImagePrimitive {
     pub fn __runtime_resolved(
         resource: ResourceRef,
         intrinsic_size: ImageIntrinsicSize,
-        patches: Vec<([f32; 4], LogicalRect)>,
+        patches: Vec<([f64; 4], LogicalRect)>,
     ) -> Option<Self> {
         if resource.kind() != ResourceKind::Image {
             return None;
@@ -135,13 +135,15 @@ impl ImagePrimitive {
         let mut resolved = Vec::with_capacity(patches.len());
         for (source, destination) in patches {
             let [x, y, width, height] = source;
-            if !source.into_iter().all(f32::is_finite)
+            if !source.into_iter().all(f64::is_finite)
                 || x < 0.0
                 || y < 0.0
                 || width < 0.0
                 || height < 0.0
-                || f64::from(x) + f64::from(width) > intrinsic_width
-                || f64::from(y) + f64::from(height) > intrinsic_height
+                || width > intrinsic_width
+                || height > intrinsic_height
+                || x > intrinsic_width - width
+                || y > intrinsic_height - height
             {
                 return None;
             }
@@ -199,7 +201,7 @@ impl ImagePrimitive {
     ///
     /// The source tuple is `[x, y, width, height]` in intrinsic pixel space.
     #[must_use]
-    pub fn resolved_patch(&self, index: usize) -> Option<([f32; 4], LogicalRect)> {
+    pub fn resolved_patch(&self, index: usize) -> Option<([f64; 4], LogicalRect)> {
         let ImagePrimitivePhase::Resolved(resolved) = &self.phase else {
             return None;
         };
@@ -581,6 +583,24 @@ mod tests {
                 vec![([39.0, 0.0, 2.0, 20.0], destination)],
             )
             .is_none()
+        );
+    }
+
+    #[test]
+    fn runtime_image_bridge_preserves_large_exact_intrinsic_source_extent() {
+        let intrinsic = ImageIntrinsicSize::new(16_777_217, 1)
+            .unwrap_or_else(|| unreachable!("test image extent is non-zero"));
+        let destination = LogicalRect::try_new(0.0, 0.0, 1.0, 1.0)
+            .unwrap_or_else(|_| unreachable!("test destination is valid"));
+        let resolved = super::ImagePrimitive::__runtime_resolved(
+            ResourceRef::new(ResourceKind::Image),
+            intrinsic,
+            vec![([0.0, 0.0, 16_777_217.0, 1.0], destination)],
+        )
+        .unwrap_or_else(|| unreachable!("f64 source geometry retains exact u32 extent"));
+        assert_eq!(
+            resolved.resolved_patch(0),
+            Some(([0.0, 0.0, 16_777_217.0, 1.0], destination))
         );
     }
 
