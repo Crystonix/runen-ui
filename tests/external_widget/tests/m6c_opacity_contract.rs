@@ -50,7 +50,7 @@ fn srgb8_to_linear(channel: u8) -> f32 {
     }
 }
 
-fn solid_color(primitive: &PaintPrimitive) -> Option<Color> {
+const fn solid_color(primitive: &PaintPrimitive) -> Option<Color> {
     match primitive {
         PaintPrimitive::Fill {
             brush: Brush::Solid(color),
