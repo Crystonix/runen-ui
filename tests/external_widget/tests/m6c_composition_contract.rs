@@ -53,7 +53,7 @@ fn fill_item_covers_surface_point(item: &PaintSceneItem, surface_point: LogicalP
             .all(|clip| clip.contains_surface_point(surface_point))
 }
 
-fn solid_color(primitive: &PaintPrimitive) -> Option<Color> {
+const fn solid_color(primitive: &PaintPrimitive) -> Option<Color> {
     match primitive {
         PaintPrimitive::Fill {
             brush: Brush::Solid(color),
