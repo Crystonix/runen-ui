@@ -5,11 +5,12 @@ use reference_consumer::{
     ReferenceConsumer, ReferencePaintRecord, ReferenceSnapshot, ReferenceUpdateMode,
 };
 use runenui_core::{
-    Color, ContributionClip, Element, HitContribution, HitContributionContext, HitRegion,
+    Brush, Color, ContributionClip, Element, HitContribution, HitContributionContext, HitRegion,
     IntoEffects, LogicalLength, LogicalPoint, LogicalRect, LogicalSize, LogicalTransform,
     MountedNodeId, NoHostProtocol, PaintContribution, PaintContributionContext,
     PaintContributionItem, PaintPrimitive, PointerPolicy, Radius, ResourceKind, ResourceRef,
-    SceneLayer, SceneOpacity, SceneShape, StyleEnvironment, UiApp, View, Widget, WidgetMeasure,
+    SceneLayer, SceneOpacity, SceneShape, StrokeJoin, StrokeStyle, StyleEnvironment, UiApp, View,
+    Widget, WidgetMeasure,
 };
 use runenui_external_renderer_conformance::{
     ConsumerSnapshot, SceneConsumer, UpdateMode, sample_literal_paint,
@@ -45,19 +46,19 @@ impl Widget<()> for SceneOwner {
             .unwrap_or_else(|_| unreachable!("fixture transform is valid"));
 
         PaintContribution::new(vec![
-            PaintContributionItem::fill_rect(
+            fill_rect(
                 rect(0.0, 0.0, 30.0, 30.0),
                 Color::rgba(255, 0, 0, 255),
             )
             .with_layer(SceneLayer::new(-1)),
-            PaintContributionItem::fill_rect(
+            fill_rect(
                 rect(0.0, 0.0, 10.0, 10.0),
                 Color::rgba(0, 0, 255, 255),
             )
             .with_transform(translated)
             .with_clip(rounded_clip)
             .with_opacity(half),
-            PaintContributionItem::stroke_rect(
+            stroke_rect(
                 rect(2.0, 2.0, 12.0, 12.0),
                 Color::rgba(0, 255, 0, 128),
                 LogicalLength::from(2_u16),
@@ -142,6 +143,18 @@ fn rect(x: f32, y: f32, width: f32, height: f32) -> LogicalRect {
         .unwrap_or_else(|_| unreachable!("fixture rectangle is valid"))
 }
 
+fn fill_rect(rect: LogicalRect, color: Color) -> PaintContributionItem {
+    PaintContributionItem::fill(SceneShape::rect(rect), Brush::solid(color))
+}
+
+fn stroke_rect(rect: LogicalRect, color: Color, width: LogicalLength) -> PaintContributionItem {
+    PaintContributionItem::stroke(
+        SceneShape::rect(rect),
+        Brush::solid(color),
+        StrokeStyle::new(width),
+    )
+}
+
 fn point(x: f32, y: f32) -> LogicalPoint {
     LogicalPoint::new(x, y).unwrap_or_else(|_| unreachable!("fixture point is finite"))
 }
@@ -176,15 +189,22 @@ fn reference_literal_source(
     }
 
     let color = match item.primitive() {
-        PaintPrimitive::FillRect { rect, color }
-            if rect.width() > 0.0
-                && rect.height() > 0.0
-                && reference_rect_contains(*rect, local_point) =>
+        PaintPrimitive::Fill {
+            shape: SceneShape::Rect(rect),
+            brush: Brush::Solid(color),
+        } if rect.width() > 0.0
+            && rect.height() > 0.0
+            && reference_rect_contains(*rect, local_point) =>
         {
             *color
         }
-        PaintPrimitive::StrokeRect { rect, color, width }
-            if reference_stroke_covers(*rect, width.get(), local_point) =>
+        PaintPrimitive::Stroke {
+            shape: SceneShape::Rect(rect),
+            brush: Brush::Solid(color),
+            style,
+        } if matches!(style.join(), StrokeJoin::Miter)
+            && style.miter_limit() >= core::f32::consts::SQRT_2
+            && reference_stroke_covers(*rect, style.width().get(), local_point) =>
         {
             *color
         }
