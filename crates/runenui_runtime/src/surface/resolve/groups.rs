@@ -196,9 +196,8 @@ fn derive_group_plan(
     for (item_index, immediate_group) in item_groups.iter().copied().enumerate() {
         let mut cursor = immediate_group;
         while let Some(group) = cursor {
-            anchors[group] = Some(
-                anchors[group].map_or(item_index, |anchor: usize| anchor.min(item_index)),
-            );
+            anchors[group] =
+                Some(anchors[group].map_or(item_index, |anchor: usize| anchor.min(item_index)));
             cursor = parents[group];
         }
     }
@@ -233,7 +232,10 @@ pub(super) fn derive_composition_groups(
         .iter()
         .map(|item| item.explicit_group)
         .collect::<Vec<_>>();
-    let mut items = ordered.into_iter().map(|item| item.item).collect::<Vec<_>>();
+    let mut items = ordered
+        .into_iter()
+        .map(|item| item.item)
+        .collect::<Vec<_>>();
     if items.is_empty() || topology.nodes.is_empty() {
         let item_count = items.len();
         return (items, PaintSceneComposition::ungrouped(item_count));
