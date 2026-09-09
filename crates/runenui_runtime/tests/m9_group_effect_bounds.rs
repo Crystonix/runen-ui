@@ -1,8 +1,8 @@
 use runenui_core::{
     Brush, Color, ContributionClip, DropShadow, Element, IntoEffects, LogicalLength, LogicalPoint,
     LogicalRect, NoHostProtocol, PaintContribution, PaintContributionContext,
-    PaintContributionGroup, PaintContributionItem, ResourceKind, ResourceRef, SceneShape,
-    StyleEnvironment, UiApp, View, Widget, WidgetMeasure, WidgetMeasureInput,
+    PaintContributionGroup, PaintContributionItem, ResourceKind, ResourceRef, SceneOpacity,
+    SceneShape, StyleEnvironment, UiApp, View, Widget, WidgetMeasure, WidgetMeasureInput,
 };
 use runenui_runtime::{
     AppRuntime, LayoutConstraints, PaintDamage, PaintSceneBounds, PaintSceneGroupId,
@@ -15,6 +15,7 @@ enum Case {
     RepeatedShadows,
     PositiveSpreadOffsetBlur,
     NegativeSpread,
+    ZeroOpacity,
     ClipAfterEffects,
     UnboundedChildFiniteClip,
 }
@@ -39,6 +40,7 @@ impl Widget<()> for BoundsPaint {
             Case::RepeatedShadows => repeated_shadows(),
             Case::PositiveSpreadOffsetBlur => positive_spread_offset_blur(),
             Case::NegativeSpread => negative_spread(),
+            Case::ZeroOpacity => zero_opacity(),
             Case::ClipAfterEffects => clip_after_effects(),
             Case::UnboundedChildFiniteClip => unbounded_child_finite_clip(),
         }
@@ -110,7 +112,13 @@ fn positive_spread_offset_blur() -> PaintContribution {
 
 fn negative_spread() -> PaintContribution {
     let group = PaintContributionGroup::new(vec![leaf().into()])
-        .with_shadows(vec![shadow(0.0, 0.0, 0.0, -100.0)]);
+        .with_shadows(vec![shadow(10.0, 0.0, 0.0, -2.0)]);
+    PaintContribution::from_entries(vec![group.into()])
+}
+
+fn zero_opacity() -> PaintContribution {
+    let group = PaintContributionGroup::new(vec![leaf().into()])
+        .with_opacity(SceneOpacity::TRANSPARENT);
     PaintContribution::from_entries(vec![group.into()])
 }
 
@@ -224,8 +232,21 @@ fn positive_spread_offset_and_three_sigma_support_expand_conservatively() {
 }
 
 #[test]
-fn negative_spread_retains_conservative_pre_shadow_aabb_without_fake_erosion() {
+fn negative_spread_retains_pre_shadow_aabb_before_offset() {
     let publication = publish(Case::NegativeSpread);
+    let group_id = root_group(&publication);
+    let item = finite_item_bounds(&publication, 0);
+    let group = finite_group_bounds(&publication, group_id);
+
+    assert_close(group.x(), item.x());
+    assert_close(group.max_x(), item.max_x() + 10.0);
+    assert_close(group.y(), item.y());
+    assert_close(group.max_y(), item.max_y());
+}
+
+#[test]
+fn zero_group_opacity_does_not_shrink_conservative_geometric_bounds() {
+    let publication = publish(Case::ZeroOpacity);
     let group_id = root_group(&publication);
     let item = finite_item_bounds(&publication, 0);
     let group = finite_group_bounds(&publication, group_id);
