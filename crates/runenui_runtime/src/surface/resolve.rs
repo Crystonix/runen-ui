@@ -448,18 +448,19 @@ pub(super) fn resolve_paint(
     let mut shaped_text_leases = Vec::new();
     for (mounted_preorder, node) in topology.nodes.iter().enumerate() {
         let owner_to_surface = presentation.node(mounted_preorder).owner_to_surface();
-        let mut next_local_order = capabilities
-            .paint_at(mounted_preorder, &node.id)
-            .map_or(0, |contribution| {
-                append_paint_contribution(
-                    &contribution,
-                    mounted_preorder,
-                    owner_to_surface,
-                    &mut diagnostics[mounted_preorder],
-                    &mut explicit_groups,
-                    &mut ordered,
-                )
-            });
+        let mut next_local_order =
+            capabilities
+                .paint_at(mounted_preorder, &node.id)
+                .map_or(0, |contribution| {
+                    append_paint_contribution(
+                        &contribution,
+                        mounted_preorder,
+                        owner_to_surface,
+                        &mut diagnostics[mounted_preorder],
+                        &mut explicit_groups,
+                        &mut ordered,
+                    )
+                });
 
         if let Some(artifact) = layout.text_layouts[mounted_preorder].artifact() {
             for line in artifact.lines() {
