@@ -1,4 +1,4 @@
-name: M9A lock refresh audit
+name: M9A item-bound candidate audit
 
 on:
   push:
@@ -9,8 +9,9 @@ permissions:
   contents: write
 
 jobs:
-  refresh-lock:
+  validate-candidate:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Check out exact scratch branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -19,16 +20,136 @@ jobs:
           fetch-depth: 0
       - name: Install repository Rust toolchain
         run: rustup toolchain install 1.93.0 --profile minimal
-      - name: Generate lockfile with Cargo 1.93.0
-        run: cargo +1.93.0 generate-lockfile
-      - name: Commit generated lockfile when changed
+      - name: Restore accepted lock baseline
+        run: git show 508d210428904d65c3a1c0caad0c193c10dee1b3:Cargo.lock > Cargo.lock
+      - name: Apply bounded candidate fixes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          bounds_path = Path("crates/runenui_runtime/src/paint_bounds.rs")
+          bounds = bounds_path.read_text()
+          old = '''        SceneShape::Rect(rect)
+                  | SceneShape::RoundedRect { rect, .. }
+                  | SceneShape::Ellipse(rect) => {
+                      if rect.width() == 0.0 || rect.height() == 0.0 {
+                          return PaintSceneBounds::Empty;
+                      }
+                      *rect
+                  }
+          '''
+          new = '''        SceneShape::Rect(rect)
+                  | SceneShape::RoundedRect { rect, .. }
+                  | SceneShape::Ellipse(rect) => *rect,
+          '''
+          if old in bounds:
+              bounds = bounds.replace(old, new, 1)
+          elif new not in bounds:
+              raise SystemExit("stroke-bound source no longer matches reviewed authority")
+
+          regression = r'''
+
+              #[test]
+              fn positive_width_stroke_over_degenerate_rect_keeps_finite_conservative_bound() {
+                  let item = scene_item(
+                      PaintPrimitive::Stroke {
+                          shape: SceneShape::rect(rect(4.0, 5.0, 0.0, 10.0)),
+                          brush: Brush::solid(Color::BLACK),
+                          style: StrokeStyle::new(
+                              LogicalLength::new(2.0).unwrap_or_else(|_| unreachable!()),
+                          ),
+                      },
+                      LogicalTransform::IDENTITY,
+                      Vec::new(),
+                  );
+                  let Some(PaintSceneBounds::Finite(bounds)) = scene(vec![item]).item_bounds(0)
+                  else {
+                      unreachable!("positive-width degenerate stroke keeps finite conservative bounds")
+                  };
+                  assert!(bounds.x() < 4.0);
+                  assert!(bounds.y() < 5.0);
+                  assert!(bounds.max_x() > 4.0);
+                  assert!(bounds.max_y() > 15.0);
+              }
+          '''
+          if "positive_width_stroke_over_degenerate_rect_keeps_finite_conservative_bound" not in bounds:
+              close = bounds.rfind("\n}")
+              if close < 0:
+                  raise SystemExit("paint-bound test module close not found")
+              bounds = bounds[:close] + regression + bounds[close:]
+          bounds_path.write_text(bounds)
+
+          integration_path = Path("crates/runenui_runtime/tests/m9_presentation_geometry.rs")
+          integration = integration_path.read_text()
+          if "PaintPrimitive" not in integration:
+              integration = integration.replace(
+                  "Color, IntoEffects, LayoutDimension, LayoutStyle, LogicalLength, LogicalPoint, NoHostProtocol,",
+                  "Color, IntoEffects, LayoutDimension, LayoutStyle, LogicalLength, LogicalPoint, NoHostProtocol,\n    PaintPrimitive,",
+                  1,
+              )
+          if "PaintSceneBounds" not in integration:
+              integration = integration.replace(
+                  "use runenui_runtime::{AppRuntime, LayoutConstraints, SurfaceBuildContext};",
+                  "use runenui_runtime::{\n    AppRuntime, LayoutConstraints, PaintSceneBounds, SurfaceBuildContext,\n};",
+                  1,
+              )
+          runtime_proof = r'''
+
+          #[test]
+          fn runtime_publication_retains_finite_logical_shaped_text_bounds() {
+              let mut runtime = AppRuntime::<PresentationGeometryApp>::mount(());
+              let environment = StyleEnvironment::default();
+              let publication = runtime
+                  .publish_surface(&SurfaceBuildContext::new(
+                      &environment,
+                      LayoutConstraints::unbounded(),
+                  ))
+                  .unwrap_or_else(|_| unreachable!("controlled text publication is admitted"));
+              let scene = publication.paint_scene();
+              let (item_index, item) = scene
+                  .items()
+                  .iter()
+                  .enumerate()
+                  .find(|(_, item)| matches!(item.primitive(), PaintPrimitive::ShapedTextRun(_)))
+                  .unwrap_or_else(|| unreachable!("button label contributes shaped text"));
+              let PaintPrimitive::ShapedTextRun(run) = item.primitive() else {
+                  unreachable!("selected item is shaped text")
+              };
+              assert!(scene.shaped_text_resource(run.resource_ref()).is_some());
+              let Some(PaintSceneBounds::Finite(bounds)) = scene.item_bounds(item_index) else {
+                  unreachable!("retained ordinary shaped text has finite logical ink bounds")
+              };
+              assert!(bounds.width() > 0.0);
+              assert!(bounds.height() > 0.0);
+          }
+          '''
+          if "runtime_publication_retains_finite_logical_shaped_text_bounds" not in integration:
+              integration += runtime_proof
+          integration_path.write_text(integration)
+          PY
+      - name: Resolve changed manifest without refreshing locked versions
+        run: cargo +1.93.0 check --workspace --all-targets --all-features
+      - name: Format candidate
+        run: cargo +1.93.0 fmt --all
+      - name: Run focused item-bound proofs
+        run: |
+          cargo +1.93.0 test -p runenui_text
+          cargo +1.93.0 test -p runenui_runtime paint_bounds
+          cargo +1.93.0 test -p runenui_runtime --test m9_presentation_geometry
+      - name: Run canonical repository validation
+        run: cargo +1.93.0 validate
+      - name: Check candidate hygiene
+        run: |
+          git diff --check
+          git status --short
+      - name: Commit validated candidate when changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.lock
+          git add Cargo.lock crates/runenui_runtime/src/paint_bounds.rs crates/runenui_runtime/tests/m9_presentation_geometry.rs
           if git diff --cached --quiet; then
-            echo "Cargo.lock already current"
+            echo "Candidate already current"
             exit 0
           fi
-          git commit -m "chore: generate M9A lockfile with Cargo 1.93.0"
+          git commit -m "fix: close M9A item-bound correctness and proof gaps"
           git push origin HEAD:codex/m9a-lock-refresh-audit
