@@ -5,7 +5,7 @@ use super::SceneClip;
 /// Snapshot-local reference to one immutable paint composition group.
 ///
 /// The value is issued only while runtime stages one [`super::PaintScene`].
-/// It is structural publication identity only: it has no mounted, semantic,
+/// It is a structural publication reference only: it has no mounted, semantic,
 /// reconciliation, widget-state, lifecycle, or cross-publication meaning.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PaintSceneGroupId(usize);
@@ -78,7 +78,7 @@ pub struct PaintSceneGroup {
 }
 
 impl PaintSceneGroup {
-    pub(crate) fn new(
+    pub(crate) const fn new(
         parent: Option<PaintSceneGroupId>,
         entries: Vec<PaintSceneEntry>,
         clips: Vec<SceneClip>,
@@ -125,8 +125,9 @@ impl PaintSceneGroup {
     }
 }
 
+/// Private scene-level aggregate for immutable group storage and contracted root entries.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct PaintSceneComposition {
+pub struct PaintSceneComposition {
     groups: Vec<PaintSceneGroup>,
     root_entries: Vec<PaintSceneEntry>,
 }
@@ -139,7 +140,10 @@ impl PaintSceneComposition {
         }
     }
 
-    pub(crate) fn new(groups: Vec<PaintSceneGroup>, root_entries: Vec<PaintSceneEntry>) -> Self {
+    pub(crate) const fn new(
+        groups: Vec<PaintSceneGroup>,
+        root_entries: Vec<PaintSceneEntry>,
+    ) -> Self {
         Self {
             groups,
             root_entries,
