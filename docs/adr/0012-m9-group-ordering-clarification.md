@@ -49,7 +49,7 @@ This ADR **narrowly amends ADR 0010** only for:
 2. deterministic group insertion/ordered membership;
 3. the mounted visual-subtree scope of node opacity and ordinary node shadows; and
 4. the exact runtime-derived node-effect isolation predicate, including its interaction
-   with active opacity/shadow motion.
+   with active opacity/shadow transitions and explicit timelines.
 
 For those subjects, ADR 0012 controls. ADR 0011 continues to control path-fill,
 stroke-closure, ellipse, and signed-shadow-spread/effect-bound semantics. Every other
@@ -156,19 +156,26 @@ whether its opacity/effects are identity-valued. Structurally empty groups retai
 omission rule above.
 
 For M9B motion, group existence is derived from the staged candidate, never from a
-renderer frame. A live node-opacity or node-shadow motion keeps the runtime-derived
-group present when either the current sampled effective value requires isolation under
-the static predicate above **or** that live motion's canonical target requires
-isolation. This makes identity-to-effect motion establish the stacking context in its
-successful start candidate and keeps effect-to-identity motion isolated while a
-non-identity sample remains live.
+renderer frame. The two accepted motion sources use exact source-specific requirements:
+
+- for a live style transition of node opacity or shadows, the group remains present
+  when either the current sampled effective value requires isolation under the static
+  predicate above or the transition's terminal target requires isolation;
+- for a live explicit opacity/shadow timeline, the group remains present when either
+  the current sampled effective value requires isolation or any accepted keyframe
+  value in that live timeline specification requires isolation.
+
+The explicit-timeline rule intentionally prevents a stacking context from appearing
+and disappearing merely because one intermediate keyframe or repeat boundary happens
+to equal the identity value. An identity-only explicit timeline does not create a
+node-effect group by itself.
 
 A candidate that atomically completes motion evaluates this predicate against the
-post-completion motion state: the completed record does not keep an otherwise identity
-node isolated. Replacement uses the surviving replacement motion/target after the
-accepted cancellation/replacement ordering. Group creation/removal, the sampled
-property product, and motion lifetime state commit atomically with the staged
-publication.
+post-completion motion state: the completed transition/timeline does not keep an
+otherwise identity node isolated. Replacement uses the surviving replacement motion
+source and its terminal target or keyframe specification after the accepted
+cancellation/replacement ordering. Group creation/removal, the sampled property
+product, and motion lifetime state commit atomically with the staged publication.
 
 ### Explicit owner-local groups remain locally owned
 
@@ -266,8 +273,9 @@ bounds remain conservative, and effects do not leak into layout/hit/focus/semant
 authority.
 
 M9B proof must preserve the same ordering semantics across motion. `M9MOTION-06` owns
-sample/target-driven group recomposition and invalidation without relayout, while
-`M9MOTION-09` owns atomic start/replacement/completion correlation between live motion
-state, group existence, and the staged publication.
+sample/transition-target/timeline-spec-driven group recomposition and invalidation
+without relayout, while `M9MOTION-09` owns atomic start/replacement/completion
+correlation between live motion source/specification, group existence, and the staged
+publication.
 
 No row is promoted by accepting this architecture amendment.
