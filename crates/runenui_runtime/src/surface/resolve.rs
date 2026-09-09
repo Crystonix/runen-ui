@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+mod explicit_groups;
 mod groups;
 mod image_mapping;
 
@@ -374,13 +375,31 @@ pub(super) fn resolve_paint(
     super::cache::note_paint_phase_execution();
     let mut diagnostics = empty_scene_diagnostics(topology);
     let mut ordered = Vec::new();
+    let mut explicit_groups = Vec::new();
     let mut shaped_text_leases = Vec::new();
     for (mounted_preorder, node) in topology.nodes.iter().enumerate() {
         let owner_to_surface = presentation.node(mounted_preorder).owner_to_surface();
         let mut next_local_order = 0;
         if let Some(contribution) = capabilities.paint_at(mounted_preorder, &node.id) {
+            let local_groups = explicit_groups::append_resolved_explicit_groups(
+                &contribution,
+                mounted_preorder,
+                owner_to_surface,
+                &mut diagnostics[mounted_preorder],
+                &mut explicit_groups,
+            );
             for (contribution_local_order, item) in contribution.items().iter().enumerate() {
                 next_local_order = contribution_local_order + 1;
+                let explicit_group = match contribution.__runtime_item_group(contribution_local_order)
+                {
+                    Some(local_group) => {
+                        let Some(group) = local_groups.get(local_group).copied().flatten() else {
+                            continue;
+                        };
+                        Some(group)
+                    }
+                    None => None,
+                };
                 let Ok(local_to_surface) = item.local_transform().then(owner_to_surface) else {
                     diagnostics[mounted_preorder].push(scene_transform_diagnostic(
                         SceneContributionFamily::Paint,
@@ -407,10 +426,11 @@ pub(super) fn resolve_paint(
                 ) else {
                     continue;
                 };
-                ordered.push((
+                ordered.push(groups::OrderedPaintItem::new(
                     item.layer(),
                     mounted_preorder,
                     contribution_local_order,
+                    explicit_group,
                     PaintSceneItem::new(
                         image_mapping::publication_primitive(item),
                         local_to_surface,
@@ -434,10 +454,11 @@ pub(super) fn resolve_paint(
                         });
                     shaped_text_leases.push(lease);
                     let item = text_run_item(run, &styles.resolutions[mounted_preorder]);
-                    ordered.push((
+                    ordered.push(groups::OrderedPaintItem::new(
                         item.layer(),
                         mounted_preorder,
                         next_local_order,
+                        None,
                         PaintSceneItem::new(
                             item.primitive().clone(),
                             owner_to_surface,
@@ -451,10 +472,9 @@ pub(super) fn resolve_paint(
             }
         }
     }
-    ordered.sort_by_key(|(layer, mounted_preorder, contribution_local_order, _)| {
-        (*layer, *mounted_preorder, *contribution_local_order)
-    });
-    let (items, composition) = groups::derive_static_node_effect_groups(topology, styles, ordered);
+    ordered.sort_by_key(groups::OrderedPaintItem::ordering_key);
+    let (items, composition) =
+        groups::derive_composition_groups(topology, styles, &explicit_groups, ordered);
     ResolvedPaint {
         scene: PaintScene::with_composition(items, shaped_text_leases, composition),
         diagnostics,
