@@ -390,7 +390,8 @@ pub(super) fn resolve_paint(
             );
             for (contribution_local_order, item) in contribution.items().iter().enumerate() {
                 next_local_order = contribution_local_order + 1;
-                let explicit_group = match contribution.__runtime_item_group(contribution_local_order)
+                let explicit_group = match contribution
+                    .__runtime_item_group(contribution_local_order)
                 {
                     Some(local_group) => {
                         let Some(group) = local_groups.get(local_group).copied().flatten() else {
