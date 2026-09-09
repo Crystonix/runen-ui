@@ -1,0 +1,34 @@
+name: M9A lock refresh audit
+
+on:
+  push:
+    branches:
+      - codex/m9a-lock-refresh-audit
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-lock:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact scratch branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/m9a-lock-refresh-audit
+          fetch-depth: 0
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install 1.93.0 --profile minimal
+      - name: Generate lockfile with Cargo 1.93.0
+        run: cargo +1.93.0 generate-lockfile
+      - name: Commit generated lockfile when changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock
+          if git diff --cached --quiet; then
+            echo "Cargo.lock already current"
+            exit 0
+          fi
+          git commit -m "chore: generate M9A lockfile with Cargo 1.93.0"
+          git push origin HEAD:codex/m9a-lock-refresh-audit
