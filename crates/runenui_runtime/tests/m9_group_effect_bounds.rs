@@ -152,7 +152,8 @@ fn root_group(publication: &SurfacePublication) -> PaintSceneGroupId {
 }
 
 fn finite_group_bounds(publication: &SurfacePublication, group: PaintSceneGroupId) -> LogicalRect {
-    let Some(PaintSceneBounds::Finite(bounds)) = publication.paint_scene().group_bounds(group) else {
+    let Some(PaintSceneBounds::Finite(bounds)) = publication.paint_scene().group_bounds(group)
+    else {
         unreachable!("fixture group has finite conservative bounds");
     };
     bounds
@@ -260,5 +261,8 @@ fn finite_group_clip_narrows_unbounded_child_coverage() {
 #[test]
 fn group_effect_bounds_do_not_change_m6_full_surface_damage_policy() {
     let publication = publish(Case::PositiveSpreadOffsetBlur);
-    assert_eq!(publication.paint_publication().damage(), PaintDamage::FullSurface);
+    assert_eq!(
+        publication.paint_publication().damage(),
+        PaintDamage::FullSurface
+    );
 }
