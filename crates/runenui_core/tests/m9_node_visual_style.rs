@@ -15,20 +15,8 @@ fn outline() -> Outline {
 
 fn shadows() -> Result<Vec<DropShadow>, Box<dyn std::error::Error>> {
     Ok(vec![
-        DropShadow::new(
-            1.0,
-            2.0,
-            LogicalLength::from(3_u16),
-            4.0,
-            Color::BLACK,
-        )?,
-        DropShadow::new(
-            -5.0,
-            6.0,
-            LogicalLength::from(7_u16),
-            -2.0,
-            Color::WHITE,
-        )?,
+        DropShadow::new(1.0, 2.0, LogicalLength::from(3_u16), 4.0, Color::BLACK)?,
+        DropShadow::new(-5.0, 6.0, LogicalLength::from(7_u16), -2.0, Color::WHITE)?,
     ])
 }
 
@@ -103,10 +91,7 @@ fn visual_defaults_are_normalized_and_report_initial_provenance() {
         &ComputedStyle::EMPTY.with_typography(Typography::default())
     );
     assert!(resolution.computed_style().shadows().is_empty());
-    assert_eq!(
-        resolution.computed_style().opacity(),
-        SceneOpacity::OPAQUE
-    );
+    assert_eq!(resolution.computed_style().opacity(), SceneOpacity::OPAQUE);
     assert_eq!(
         resolution.provenance().shadows(),
         &StyleFieldProvenance::Literal
@@ -153,10 +138,7 @@ fn missing_higher_visual_tokens_mask_lower_values_to_normalized_defaults()
 
     assert_eq!(resolution.computed_style().outline(), None);
     assert!(resolution.computed_style().shadows().is_empty());
-    assert_eq!(
-        resolution.computed_style().opacity(),
-        SceneOpacity::OPAQUE
-    );
+    assert_eq!(resolution.computed_style().opacity(), SceneOpacity::OPAQUE);
     assert_eq!(
         resolution.provenance().outline(),
         &StyleFieldProvenance::MissingToken(missing_outline.clone())
