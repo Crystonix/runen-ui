@@ -42,13 +42,9 @@ pub(super) fn append_resolved_explicit_groups(
     let mut local_to_resolved = Vec::with_capacity(contribution.__runtime_group_count());
     for local_group in 0..contribution.__runtime_group_count() {
         let parent_local = contribution.__runtime_group_parent(local_group);
-        if parent_local.is_some_and(|parent| {
-            local_to_resolved
-                .get(parent)
-                .copied()
-                .flatten()
-                .is_none()
-        }) {
+        if parent_local
+            .is_some_and(|parent| local_to_resolved.get(parent).copied().flatten().is_none())
+        {
             local_to_resolved.push(None);
             continue;
         }
