@@ -19,7 +19,9 @@ jobs:
           ref: codex/m9a-lock-refresh-audit
           fetch-depth: 0
       - name: Install repository Rust toolchain
-        run: rustup toolchain install 1.93.0 --profile minimal
+        run: |
+          rustup toolchain install 1.93.0 --profile minimal
+          rustup component add --toolchain 1.93.0 rustfmt clippy
       - name: Restore accepted lock baseline
         run: git show 508d210428904d65c3a1c0caad0c193c10dee1b3:Cargo.lock > Cargo.lock
       - name: Apply bounded candidate fixes
