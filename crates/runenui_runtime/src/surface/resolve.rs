@@ -454,8 +454,7 @@ pub(super) fn resolve_paint(
     ordered.sort_by_key(|(layer, mounted_preorder, contribution_local_order, _)| {
         (*layer, *mounted_preorder, *contribution_local_order)
     });
-    let (items, composition) =
-        groups::derive_static_node_effect_groups(topology, styles, ordered);
+    let (items, composition) = groups::derive_static_node_effect_groups(topology, styles, ordered);
     ResolvedPaint {
         scene: PaintScene::with_composition(items, shaped_text_leases, composition),
         diagnostics,

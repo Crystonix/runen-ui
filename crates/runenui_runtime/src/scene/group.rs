@@ -139,10 +139,7 @@ impl PaintSceneComposition {
         }
     }
 
-    pub(crate) fn new(
-        groups: Vec<PaintSceneGroup>,
-        root_entries: Vec<PaintSceneEntry>,
-    ) -> Self {
+    pub(crate) fn new(groups: Vec<PaintSceneGroup>, root_entries: Vec<PaintSceneEntry>) -> Self {
         Self {
             groups,
             root_entries,

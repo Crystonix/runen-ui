@@ -292,8 +292,8 @@ const fn unsupported(
 mod tests {
     use runenui_core::{
         Brush, Color, Element, IntoEffects, LogicalLength, LogicalRect, NoHostProtocol,
-        PaintContribution, PaintContributionContext, PaintContributionItem, SceneOpacity, SceneShape,
-        StyleEnvironment, UiApp, View, Widget, WidgetMeasure, WidgetMeasureInput,
+        PaintContribution, PaintContributionContext, PaintContributionItem, SceneOpacity,
+        SceneShape, StyleEnvironment, UiApp, View, Widget, WidgetMeasure, WidgetMeasureInput,
     };
     use runenui_runtime::{AppRuntime, LayoutConstraints, SurfaceBuildContext};
 

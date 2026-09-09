@@ -37,11 +37,8 @@ impl Widget<()> for LayeredPaint {
             self.entries
                 .iter()
                 .map(|(layer, red)| {
-                    PaintContributionItem::fill(
-                        SceneShape::rect(rect()),
-                        Brush::solid(color(*red)),
-                    )
-                    .with_layer(SceneLayer::new(*layer))
+                    PaintContributionItem::fill(SceneShape::rect(rect()), Brush::solid(color(*red)))
+                        .with_layer(SceneLayer::new(*layer))
                 })
                 .collect(),
         )
@@ -56,16 +53,11 @@ impl UiApp for GroupedApp {
     type HostProtocol = NoHostProtocol;
 
     fn root(_: &Self::State) -> impl View<Self::Action> {
-        let opacity = SceneOpacity::new(0.5)
-            .unwrap_or_else(|_| unreachable!("controlled opacity is valid"));
-        let transparent_shadow = DropShadow::new(
-            2.0,
-            3.0,
-            LogicalLength::ZERO,
-            0.0,
-            Color::TRANSPARENT,
-        )
-        .unwrap_or_else(|_| unreachable!("controlled shadow is finite"));
+        let opacity =
+            SceneOpacity::new(0.5).unwrap_or_else(|_| unreachable!("controlled opacity is valid"));
+        let transparent_shadow =
+            DropShadow::new(2.0, 3.0, LogicalLength::ZERO, 0.0, Color::TRANSPARENT)
+                .unwrap_or_else(|_| unreachable!("controlled shadow is finite"));
 
         column(vec![
             column(vec![Element::new(LayeredPaint {
@@ -123,10 +115,10 @@ impl UiApp for SiblingGroupsApp {
     type HostProtocol = NoHostProtocol;
 
     fn root(_: &Self::State) -> impl View<Self::Action> {
-        let opacity_a = SceneOpacity::new(0.5)
-            .unwrap_or_else(|_| unreachable!("controlled opacity is valid"));
-        let opacity_b = SceneOpacity::new(0.75)
-            .unwrap_or_else(|_| unreachable!("controlled opacity is valid"));
+        let opacity_a =
+            SceneOpacity::new(0.5).unwrap_or_else(|_| unreachable!("controlled opacity is valid"));
+        let opacity_b =
+            SceneOpacity::new(0.75).unwrap_or_else(|_| unreachable!("controlled opacity is valid"));
         column(vec![
             column(vec![Element::new(LayeredPaint {
                 entries: &[(-2, 10), (2, 12)],
@@ -159,8 +151,7 @@ impl UiApp for EmptyGroupApp {
 
     fn root(_: &Self::State) -> impl View<Self::Action> {
         column(Vec::<Element<()>>::new()).opacity(
-            SceneOpacity::new(0.5)
-                .unwrap_or_else(|_| unreachable!("controlled opacity is valid")),
+            SceneOpacity::new(0.5).unwrap_or_else(|_| unreachable!("controlled opacity is valid")),
         )
     }
 
