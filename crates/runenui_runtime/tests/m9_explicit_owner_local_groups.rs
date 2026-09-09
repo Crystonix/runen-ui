@@ -1,13 +1,12 @@
 #![allow(refining_impl_trait)]
 
 use runenui_core::{
-    Brush, ChildBearingWidget, Color, ContributionClip, Element, FontFamilyName,
-    GenericFontFamily, IntoEffects, LogicalLength, LogicalRect, LogicalSize, LogicalTransform,
-    NoHostProtocol, PaintContribution, PaintContributionContext, PaintContributionGroup,
-    PaintContributionItem, PaintPrimitive, PresentationOrigin, PresentationRotation,
-    PresentationScale, PresentationTransform, PresentationTranslation, SceneLayer, SceneOpacity,
-    SceneShape, StyleEnvironment, UiApp, UnitInterval, View, Widget, WidgetMeasure,
-    WidgetMeasureInput, container,
+    Brush, ChildBearingWidget, Color, ContributionClip, Element, FontFamilyName, GenericFontFamily,
+    IntoEffects, LogicalLength, LogicalRect, LogicalTransform, NoHostProtocol, PaintContribution,
+    PaintContributionContext, PaintContributionGroup, PaintContributionItem, PaintPrimitive,
+    PresentationOrigin, PresentationRotation, PresentationScale, PresentationTransform,
+    PresentationTranslation, SceneLayer, SceneOpacity, SceneShape, StyleEnvironment, UiApp,
+    UnitInterval, View, Widget, WidgetMeasure, WidgetMeasureInput, container,
 };
 use runenui_runtime::{
     AppRuntime, LayoutConstraints, PaintSceneEntry, PaintSceneGroupId, SurfaceBuildContext,
@@ -111,13 +110,11 @@ impl Widget<()> for NestedExplicitPaint {
 
     fn paint(&self, (): &Self::State, _: PaintContributionContext) -> PaintContribution {
         let nested = PaintContributionGroup::new(vec![fill(20, 2).into()]).with_opacity(
-            SceneOpacity::new(0.5)
-                .unwrap_or_else(|_| unreachable!("controlled opacity is valid")),
+            SceneOpacity::new(0.5).unwrap_or_else(|_| unreachable!("controlled opacity is valid")),
         );
         let outer = PaintContributionGroup::new(vec![fill(10, -2).into(), nested.into()]);
-        let empty = PaintContributionGroup::new(vec![
-            PaintContributionGroup::new(Vec::new()).into(),
-        ]);
+        let empty =
+            PaintContributionGroup::new(vec![PaintContributionGroup::new(Vec::new()).into()]);
         PaintContribution::from_entries(vec![empty.into(), outer.into(), fill(30, 0).into()])
     }
 }
@@ -227,8 +224,7 @@ impl UiApp for ExplicitInsideNodeEffectApp {
             vec![Element::new(ForeignChildPaint)],
         )
         .opacity(
-            SceneOpacity::new(0.5)
-                .unwrap_or_else(|_| unreachable!("controlled opacity is valid")),
+            SceneOpacity::new(0.5).unwrap_or_else(|_| unreachable!("controlled opacity is valid")),
         )
     }
 
@@ -301,8 +297,7 @@ impl UiApp for TextAndExplicitApp {
 
     fn root((): &Self::State) -> impl View<Self::Action> {
         Element::new(TextAndExplicitPaint).opacity(
-            SceneOpacity::new(0.5)
-                .unwrap_or_else(|_| unreachable!("controlled opacity is valid")),
+            SceneOpacity::new(0.5).unwrap_or_else(|_| unreachable!("controlled opacity is valid")),
         )
     }
 
@@ -353,10 +348,12 @@ fn runtime_generated_shaped_text_stays_outside_widget_authored_group_but_inside_
     assert!(!shaped_indices.is_empty());
     for index in shaped_indices {
         assert_eq!(scene.items()[index].group(), Some(node_group_id));
-        assert!(node_group
-            .entries()
-            .iter()
-            .any(|entry| entry.item_index() == Some(index)));
+        assert!(
+            node_group
+                .entries()
+                .iter()
+                .any(|entry| entry.item_index() == Some(index))
+        );
     }
 }
 
@@ -512,9 +509,8 @@ impl Widget<()> for OverflowGroupClipOwner {
     fn paint(&self, (): &Self::State, _: PaintContributionContext) -> PaintContribution {
         let huge_scale = LogicalTransform::try_new(f32::MAX, 0.0, 0.0, 1.0, 0.0, 0.0)
             .unwrap_or_else(|_| unreachable!("maximum finite scale is accepted"));
-        let group = PaintContributionGroup::new(vec![fill(10, 0).into()]).with_clip(
-            ContributionClip::new(SceneShape::rect(rect()), huge_scale),
-        );
+        let group = PaintContributionGroup::new(vec![fill(10, 0).into()])
+            .with_clip(ContributionClip::new(SceneShape::rect(rect()), huge_scale));
         PaintContribution::from_entries(vec![group.into(), fill(20, 0).into()])
     }
 }
