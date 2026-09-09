@@ -20,7 +20,7 @@ fn color(red: u8) -> Color {
 
 #[derive(Debug)]
 struct LayeredPaint {
-    entries: &'static [(i32, u8)],
+    entries: &'static [(i64, u8)],
 }
 
 impl Widget<()> for LayeredPaint {
