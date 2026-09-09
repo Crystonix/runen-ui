@@ -1,6 +1,9 @@
 //! Runtime-resolved host-neutral style data.
 
-use crate::{Brush, Color, DropShadow, EdgeInsets, Outline, Radius, SceneOpacity, Typography};
+use crate::{
+    Brush, Color, DropShadow, EdgeInsets, Outline, PresentationTransform, Radius, SceneOpacity,
+    Typography,
+};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ComputedStyle {
@@ -12,6 +15,7 @@ pub struct ComputedStyle {
     outline: Option<Outline>,
     shadows: Vec<DropShadow>,
     opacity: SceneOpacity,
+    presentation: Option<PresentationTransform>,
 }
 
 impl ComputedStyle {
@@ -24,6 +28,7 @@ impl ComputedStyle {
         outline: None,
         shadows: Vec::new(),
         opacity: SceneOpacity::OPAQUE,
+        presentation: None,
     };
     #[must_use]
     pub const fn is_empty(&self) -> bool {
@@ -35,6 +40,7 @@ impl ComputedStyle {
             && self.outline.is_none()
             && self.shadows.is_empty()
             && self.opacity.get().to_bits() == SceneOpacity::OPAQUE.get().to_bits()
+            && self.presentation.is_none()
     }
     #[must_use]
     pub const fn with_foreground(mut self, value: Color) -> Self {
@@ -77,6 +83,11 @@ impl ComputedStyle {
         self
     }
     #[must_use]
+    pub const fn with_presentation(mut self, value: PresentationTransform) -> Self {
+        self.presentation = Some(value);
+        self
+    }
+    #[must_use]
     pub const fn foreground(&self) -> Option<Color> {
         self.foreground
     }
@@ -107,5 +118,9 @@ impl ComputedStyle {
     #[must_use]
     pub const fn opacity(&self) -> SceneOpacity {
         self.opacity
+    }
+    #[must_use]
+    pub const fn presentation(&self) -> Option<PresentationTransform> {
+        self.presentation
     }
 }

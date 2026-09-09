@@ -1,6 +1,9 @@
 //! Typed authored values for common M9 node-visual style properties.
 
-use crate::{DropShadow, OpacityToken, Outline, OutlineToken, SceneOpacity, ShadowToken};
+use crate::{
+    DropShadow, OpacityToken, Outline, OutlineToken, PresentationToken, PresentationTransform,
+    SceneOpacity, ShadowToken,
+};
 
 /// Literal-or-token authored value for the optional node outline.
 #[derive(Clone, Debug, PartialEq)]
@@ -158,11 +161,61 @@ impl From<OpacityToken> for OpacityValue {
     }
 }
 
+/// Literal-or-token authored value for the node-wide presentation transform.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PresentationValue {
+    Literal(PresentationTransform),
+    Token(PresentationToken),
+}
+
+impl PresentationValue {
+    #[must_use]
+    pub const fn literal(value: PresentationTransform) -> Self {
+        Self::Literal(value)
+    }
+
+    #[must_use]
+    pub const fn token(token: PresentationToken) -> Self {
+        Self::Token(token)
+    }
+
+    #[must_use]
+    pub const fn as_literal(&self) -> Option<PresentationTransform> {
+        if let Self::Literal(value) = self {
+            Some(*value)
+        } else {
+            None
+        }
+    }
+
+    #[must_use]
+    pub const fn as_token(&self) -> Option<&PresentationToken> {
+        if let Self::Token(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
+}
+
+impl From<PresentationTransform> for PresentationValue {
+    fn from(value: PresentationTransform) -> Self {
+        Self::Literal(value)
+    }
+}
+
+impl From<PresentationToken> for PresentationValue {
+    fn from(value: PresentationToken) -> Self {
+        Self::Token(value)
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct VisualStyleProperties {
     outline: Option<OutlineValue>,
     shadows: Option<ShadowValue>,
     opacity: Option<OpacityValue>,
+    presentation: Option<PresentationValue>,
 }
 
 impl VisualStyleProperties {
@@ -170,10 +223,14 @@ impl VisualStyleProperties {
         outline: None,
         shadows: None,
         opacity: None,
+        presentation: None,
     };
 
     pub const fn is_empty(&self) -> bool {
-        self.outline.is_none() && self.shadows.is_none() && self.opacity.is_none()
+        self.outline.is_none()
+            && self.shadows.is_none()
+            && self.opacity.is_none()
+            && self.presentation.is_none()
     }
 
     pub fn with_outline(mut self, value: impl Into<OutlineValue>) -> Self {
@@ -191,6 +248,11 @@ impl VisualStyleProperties {
         self
     }
 
+    pub fn with_presentation(mut self, value: impl Into<PresentationValue>) -> Self {
+        self.presentation = Some(value.into());
+        self
+    }
+
     pub const fn outline(&self) -> Option<&OutlineValue> {
         self.outline.as_ref()
     }
@@ -201,5 +263,9 @@ impl VisualStyleProperties {
 
     pub const fn opacity(&self) -> Option<&OpacityValue> {
         self.opacity.as_ref()
+    }
+
+    pub const fn presentation(&self) -> Option<&PresentationValue> {
+        self.presentation.as_ref()
     }
 }

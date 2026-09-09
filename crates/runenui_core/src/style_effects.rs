@@ -13,26 +13,36 @@ pub enum StyleProperty {
     Outline,
     Shadows,
     Opacity,
+    Presentation,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct StyleEffects {
     layout: bool,
     paint: bool,
+    presentation: bool,
 }
 
 impl StyleEffects {
     pub const NONE: Self = Self {
         layout: false,
         paint: false,
+        presentation: false,
     };
     pub const PAINT: Self = Self {
         layout: false,
         paint: true,
+        presentation: false,
     };
     pub const LAYOUT: Self = Self {
         layout: true,
         paint: false,
+        presentation: false,
+    };
+    pub const PRESENTATION: Self = Self {
+        layout: false,
+        paint: false,
+        presentation: true,
     };
 
     #[must_use]
@@ -44,10 +54,15 @@ impl StyleEffects {
         self.paint
     }
     #[must_use]
+    pub const fn presentation(self) -> bool {
+        self.presentation
+    }
+    #[must_use]
     pub const fn union(self, other: Self) -> Self {
         Self {
             layout: self.layout || other.layout,
             paint: self.paint || other.paint,
+            presentation: self.presentation || other.presentation,
         }
     }
 }
@@ -63,6 +78,7 @@ impl StyleProperty {
             | Self::Shadows
             | Self::Opacity => StyleEffects::PAINT,
             Self::Padding | Self::Typography => StyleEffects::LAYOUT,
+            Self::Presentation => StyleEffects::PRESENTATION,
         }
     }
 }
@@ -70,8 +86,8 @@ impl StyleProperty {
 /// Classifies the direct downstream effects of exact computed-style changes.
 ///
 /// Runtime remains responsible for dependency propagation: a layout change also
-/// makes paint/hit/semantic geometry stale. This function deliberately reports
-/// only the property-owned direct effect.
+/// makes presentation geometry and paint/hit/semantic geometry stale. This
+/// function deliberately reports only the property-owned direct effect.
 #[must_use]
 pub fn style_effects_between(old: &ComputedStyle, new: &ComputedStyle) -> StyleEffects {
     let mut effects = StyleEffects::NONE;
@@ -98,6 +114,9 @@ pub fn style_effects_between(old: &ComputedStyle, new: &ComputedStyle) -> StyleE
     }
     if old.opacity() != new.opacity() {
         effects = effects.union(StyleProperty::Opacity.effects());
+    }
+    if old.presentation() != new.presentation() {
+        effects = effects.union(StyleProperty::Presentation.effects());
     }
     effects
 }

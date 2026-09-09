@@ -4,11 +4,11 @@ use crate::{
     BrushValue, ColorValue, ElementId, ElementKey, FlexContainerStyle, FlexDirection,
     HitContribution, HitContributionContext, IntoElementId, IntoElementKey, LayoutContainer,
     LayoutStyle, LogicalLength, LogicalRect, LogicalSize, OpacityValue, OutlineValue,
-    PaintContribution, PaintContributionContext, PaintContributionItem, RadiusValue, SceneShape,
-    SemanticAction, SemanticContribution, SemanticContributionContext, SemanticNodeContribution,
-    SemanticRole, SemanticState, SemanticText, ShadowValue, SpacingValue, StyleIntent,
-    StyleRecipeId, StyleVariantId, TypographyValue, WidgetActivationContext, WidgetInvalidation,
-    WidgetUpdateContext,
+    PaintContribution, PaintContributionContext, PaintContributionItem, PresentationValue,
+    RadiusValue, SceneShape, SemanticAction, SemanticContribution, SemanticContributionContext,
+    SemanticNodeContribution, SemanticRole, SemanticState, SemanticText, ShadowValue, SpacingValue,
+    StyleIntent, StyleRecipeId, StyleVariantId, TypographyValue, WidgetActivationContext,
+    WidgetInvalidation, WidgetUpdateContext,
     element::{
         AuthoredElementFields, AuthoringDiagnostic, ChildBearingWidget, Element, View, Views,
         Widget, WidgetActivation, WidgetActivationOutput, WidgetMeasure, WidgetMeasureInput,
@@ -81,6 +81,11 @@ macro_rules! common_builder_methods {
         #[must_use]
         pub fn opacity(mut self, value: impl Into<OpacityValue>) -> Self {
             self.style = self.style.with_opacity(value);
+            self
+        }
+        #[must_use]
+        pub fn presentation(mut self, value: impl Into<PresentationValue>) -> Self {
+            self.style = self.style.with_presentation(value);
             self
         }
     };

@@ -3,7 +3,9 @@
 use crate::{
     Brush, IdentifierError, LogicalLength, Typography,
     identity::{IdentifierText, validate_identifier},
-    visual_style::{OpacityValue, OutlineValue, ShadowValue, VisualStyleProperties},
+    visual_style::{
+        OpacityValue, OutlineValue, PresentationValue, ShadowValue, VisualStyleProperties,
+    },
 };
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -91,6 +93,10 @@ define_token_ref!(
     "Typed ordered drop-shadow-list-token reference."
 );
 define_token_ref!(OpacityToken, "Typed node-opacity-token reference.");
+define_token_ref!(
+    PresentationToken,
+    "Typed node-presentation-transform-token reference."
+);
 
 macro_rules! define_style_id {
     ($name:ident, $doc:literal) => {
@@ -586,6 +592,11 @@ impl StyleProperties {
         self
     }
     #[must_use]
+    pub fn with_presentation(mut self, value: impl Into<PresentationValue>) -> Self {
+        self.visual = self.visual.with_presentation(value);
+        self
+    }
+    #[must_use]
     pub const fn foreground(&self) -> Option<&ColorValue> {
         self.foreground.as_ref()
     }
@@ -616,6 +627,10 @@ impl StyleProperties {
     #[must_use]
     pub const fn opacity(&self) -> Option<&OpacityValue> {
         self.visual.opacity()
+    }
+    #[must_use]
+    pub const fn presentation(&self) -> Option<&PresentationValue> {
+        self.visual.presentation()
     }
 }
 
@@ -693,6 +708,11 @@ impl StyleIntent {
         self
     }
     #[must_use]
+    pub fn with_presentation(mut self, value: impl Into<PresentationValue>) -> Self {
+        self.overrides = self.overrides.with_presentation(value);
+        self
+    }
+    #[must_use]
     pub const fn recipe(&self) -> Option<&StyleRecipeId> {
         self.recipe.as_ref()
     }
@@ -735,5 +755,9 @@ impl StyleIntent {
     #[must_use]
     pub const fn opacity(&self) -> Option<&OpacityValue> {
         self.overrides.opacity()
+    }
+    #[must_use]
+    pub const fn presentation(&self) -> Option<&PresentationValue> {
+        self.overrides.presentation()
     }
 }

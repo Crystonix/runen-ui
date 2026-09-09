@@ -2,11 +2,11 @@
 
 use crate::{
     Brush, BrushToken, BrushValue, Color, ColorToken, ColorValue, ComputedStyle, DropShadow,
-    EdgeInsets, OpacityToken, OpacityValue, Outline, OutlineToken, OutlineValue, Radius,
-    RadiusToken, RadiusValue, SceneOpacity, ShadowToken, ShadowValue, SpacingToken, SpacingValue,
-    StyleEnvironment, StyleIntent, StyleInteractionFacts, StyleInteractionState,
-    StylePreferenceKind, StyleProperties, StyleRecipeId, StyleTokens, StyleVariantId, Typography,
-    TypographyToken, TypographyValue,
+    EdgeInsets, OpacityToken, OpacityValue, Outline, OutlineToken, OutlineValue, PresentationToken,
+    PresentationTransform, PresentationValue, Radius, RadiusToken, RadiusValue, SceneOpacity,
+    ShadowToken, ShadowValue, SpacingToken, SpacingValue, StyleEnvironment, StyleIntent,
+    StyleInteractionFacts, StyleInteractionState, StylePreferenceKind, StyleProperties,
+    StyleRecipeId, StyleTokens, StyleVariantId, Typography, TypographyToken, TypographyValue,
 };
 
 /// Exact precedence layer that last attempted to define one property.
@@ -53,6 +53,8 @@ pub struct StyleProvenance {
     shadows_layer: Option<StyleResolutionLayer>,
     opacity: StyleFieldProvenance<OpacityToken>,
     opacity_layer: Option<StyleResolutionLayer>,
+    presentation: StyleFieldProvenance<PresentationToken>,
+    presentation_layer: Option<StyleResolutionLayer>,
 }
 
 impl StyleProvenance {
@@ -73,6 +75,8 @@ impl StyleProvenance {
         shadows_layer: None,
         opacity: StyleFieldProvenance::Absent,
         opacity_layer: None,
+        presentation: StyleFieldProvenance::Absent,
+        presentation_layer: None,
     };
 
     /// Creates value-source provenance without assigning production layers.
@@ -103,6 +107,8 @@ impl StyleProvenance {
             shadows_layer: None,
             opacity: StyleFieldProvenance::Absent,
             opacity_layer: None,
+            presentation: StyleFieldProvenance::Absent,
+            presentation_layer: None,
         }
     }
 
@@ -177,6 +183,14 @@ impl StyleProvenance {
     pub const fn opacity_layer(&self) -> Option<&StyleResolutionLayer> {
         self.opacity_layer.as_ref()
     }
+    #[must_use]
+    pub const fn presentation(&self) -> &StyleFieldProvenance<PresentationToken> {
+        &self.presentation
+    }
+    #[must_use]
+    pub const fn presentation_layer(&self) -> Option<&StyleResolutionLayer> {
+        self.presentation_layer.as_ref()
+    }
 }
 
 #[non_exhaustive]
@@ -190,6 +204,7 @@ pub enum UnresolvedStyleToken {
     Outline(OutlineToken),
     Shadows(ShadowToken),
     Opacity(OpacityToken),
+    Presentation(PresentationToken),
 }
 
 #[non_exhaustive]
@@ -255,6 +270,7 @@ struct ResolutionBuilder {
     outline: Option<Outline>,
     shadows: Option<Vec<DropShadow>>,
     opacity: Option<SceneOpacity>,
+    presentation: Option<PresentationTransform>,
     provenance: StyleProvenance,
     unresolved_tokens: Vec<UnresolvedStyleToken>,
     diagnostics: Vec<StyleResolutionDiagnostic>,
@@ -307,7 +323,10 @@ impl ResolutionBuilder {
             self.apply_shadows(value, layer.clone(), tokens);
         }
         if let Some(value) = properties.opacity() {
-            self.apply_opacity(value, layer, tokens);
+            self.apply_opacity(value, layer.clone(), tokens);
+        }
+        if let Some(value) = properties.presentation() {
+            self.apply_presentation(value, layer, tokens);
         }
     }
 
@@ -511,6 +530,32 @@ impl ResolutionBuilder {
         }
     }
 
+    fn apply_presentation(
+        &mut self,
+        value: &PresentationValue,
+        layer: StyleResolutionLayer,
+        tokens: &StyleTokens,
+    ) {
+        self.provenance.presentation_layer = Some(layer);
+        match value {
+            PresentationValue::Literal(value) => {
+                self.presentation = Some(*value);
+                self.provenance.presentation = StyleFieldProvenance::Literal;
+            }
+            PresentationValue::Token(token) => {
+                if let Some(value) = tokens.presentation(token) {
+                    self.presentation = Some(value);
+                    self.provenance.presentation =
+                        StyleFieldProvenance::ResolvedToken(token.clone());
+                } else {
+                    self.presentation = None;
+                    self.provenance.presentation = StyleFieldProvenance::MissingToken(token.clone());
+                    self.record_missing(UnresolvedStyleToken::Presentation(token.clone()));
+                }
+            }
+        }
+    }
+
     fn record_missing(&mut self, token: UnresolvedStyleToken) {
         self.unresolved_tokens.push(token.clone());
         self.diagnostics
@@ -527,6 +572,7 @@ impl ResolutionBuilder {
             outline,
             shadows,
             opacity,
+            presentation,
             provenance,
             unresolved_tokens,
             diagnostics,
@@ -552,6 +598,9 @@ impl ResolutionBuilder {
         }
         if let Some(value) = outline {
             computed_style = computed_style.with_outline(value);
+        }
+        if let Some(value) = presentation {
+            computed_style = computed_style.with_presentation(value);
         }
 
         StyleResolution::new(computed_style, provenance, unresolved_tokens, diagnostics)

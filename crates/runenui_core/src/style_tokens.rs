@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, btree_map::Entry};
 
 use crate::{
     Brush, BrushToken, Color, ColorToken, DropShadow, EdgeInsets, OpacityToken, Outline,
-    OutlineToken, Radius, RadiusToken, SceneOpacity, ShadowToken, SpacingToken, TokenId,
-    Typography, TypographyToken,
+    OutlineToken, PresentationToken, PresentationTransform, Radius, RadiusToken, SceneOpacity,
+    ShadowToken, SpacingToken, TokenId, Typography, TypographyToken,
 };
 
 #[non_exhaustive]
@@ -21,6 +21,7 @@ pub enum TokenFamily {
     Outline,
     Shadow,
     Opacity,
+    Presentation,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -63,6 +64,7 @@ pub struct StyleTokens {
     outlines: BTreeMap<OutlineToken, Outline>,
     shadows: BTreeMap<ShadowToken, Vec<DropShadow>>,
     opacities: BTreeMap<OpacityToken, SceneOpacity>,
+    presentations: BTreeMap<PresentationToken, PresentationTransform>,
     revision: u64,
 }
 
@@ -76,6 +78,7 @@ impl PartialEq for StyleTokens {
             && self.outlines == other.outlines
             && self.shadows == other.shadows
             && self.opacities == other.opacities
+            && self.presentations == other.presentations
     }
 }
 
@@ -253,6 +256,27 @@ impl StyleTokens {
         Ok(())
     }
 
+    /// Defines a node-presentation-transform token without replacement.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DuplicateTokenDefinition`] if the presentation token already exists.
+    pub fn define_presentation(
+        &mut self,
+        token: PresentationToken,
+        value: PresentationTransform,
+    ) -> Result<(), DuplicateTokenDefinition> {
+        define(
+            &mut self.presentations,
+            token,
+            value,
+            TokenFamily::Presentation,
+            PresentationToken::id,
+        )?;
+        self.advance_revision();
+        Ok(())
+    }
+
     #[must_use]
     pub fn color(&self, token: &ColorToken) -> Option<Color> {
         self.colors.get(token).copied()
@@ -286,6 +310,10 @@ impl StyleTokens {
         self.opacities.get(token).copied()
     }
     #[must_use]
+    pub fn presentation(&self, token: &PresentationToken) -> Option<PresentationTransform> {
+        self.presentations.get(token).copied()
+    }
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.colors.is_empty()
             && self.brushes.is_empty()
@@ -295,6 +323,7 @@ impl StyleTokens {
             && self.outlines.is_empty()
             && self.shadows.is_empty()
             && self.opacities.is_empty()
+            && self.presentations.is_empty()
     }
 
     /// Monotonic diagnostic revision for callers that want a cheap change hint.

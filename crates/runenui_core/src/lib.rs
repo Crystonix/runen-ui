@@ -238,6 +238,7 @@ mod paint;
 mod path;
 mod path_containment;
 mod pointer;
+mod presentation_geometry;
 pub mod prelude;
 mod resource;
 mod runtime_protocol;
@@ -305,6 +306,7 @@ pub use path::{PathFillRule, PathVerb, ScenePath, ScenePathError};
 pub mod __runtime {
     pub use crate::effects::{Effect, HostRequestEffect, MountedEffect};
     pub use crate::event_context::{EventContextOutput, PointerCaptureRequest, RoutedEventOutput};
+    pub use crate::presentation_geometry::transform_rect_aabb;
     pub use crate::runtime_protocol::RuntimeNamespace;
     pub use crate::subscription::{ErasedSendSubscriptionSource, Subscription, SubscriptionSource};
     pub use crate::widget_erasure::{
@@ -347,8 +349,9 @@ pub use semantic::{
 pub use semantic_action::{SemanticActionRequest, SemanticActionTarget};
 pub use style::{
     BrushToken, BrushValue, Color, ColorToken, ColorValue, EdgeInsets, OpacityToken, OutlineToken,
-    Radius, RadiusToken, RadiusValue, ShadowToken, SpacingToken, SpacingValue, StyleIntent,
-    StyleProperties, StyleRecipeId, StyleVariantId, TokenId, TypographyToken, TypographyValue,
+    PresentationToken, Radius, RadiusToken, RadiusValue, ShadowToken, SpacingToken, SpacingValue,
+    StyleIntent, StyleProperties, StyleRecipeId, StyleVariantId, TokenId, TypographyToken,
+    TypographyValue,
 };
 pub use style_effects::{StyleEffects, StyleProperty, style_effects_between};
 pub use style_environment::{
@@ -380,7 +383,7 @@ pub use visual::{
     PresentationTranslation, RadialGradient, StrokeCap, StrokeJoin, StrokeStyle, StrokeStyleError,
     UnitInterval, UnitIntervalError,
 };
-pub use visual_style::{OpacityValue, OutlineValue, ShadowValue};
+pub use visual_style::{OpacityValue, OutlineValue, PresentationValue, ShadowValue};
 pub use widget_context::{
     WidgetActivationContext, WidgetInvalidation, WidgetMountContext, WidgetUnmountContext,
     WidgetUnmountReason, WidgetUpdateContext,

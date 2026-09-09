@@ -8,13 +8,16 @@ use crate::scene::{HitTestRegion, HitTestSceneContent, PaintScene, PaintSceneIte
 use crate::style_debug::{SurfaceStyleNode, SurfaceStyleReport};
 use runenui_core::{
     Color, ContributionClip, ElementId, HitContributionContext, LayoutStyle, LogicalPoint,
-    LogicalTransform, PaintContributionContext, PaintContributionItem, StyleEffects,
+    LogicalRect, LogicalTransform, PaintContributionContext, PaintContributionItem, StyleEffects,
     StyleEnvironment, StyleInteractionState, StyleResolution, WidgetDiagnostic, WidgetTypeId,
-    resolve_style_in_environment, style_effects_between,
+    __runtime::transform_rect_aabb, resolve_style_in_environment, style_effects_between,
 };
 use runenui_text::TextSystem;
 
-use super::SurfaceInteractionProjection;
+use super::{
+    SurfaceInteractionProjection,
+    cache::{CachedLayoutFacts, CachedPresentationFacts, PresentationNodeFacts},
+};
 
 /// Topology and publication-alignment facts for one mounted preorder.
 ///
@@ -193,7 +196,7 @@ impl ResolvedSurfaceNode {
 }
 
 pub(super) fn paint_contexts(
-    layout: &super::cache::CachedLayoutFacts,
+    layout: &CachedLayoutFacts,
     styles: &CachedStyleFacts,
 ) -> Vec<PaintContributionContext> {
     layout
@@ -206,14 +209,46 @@ pub(super) fn paint_contexts(
         .collect()
 }
 
-pub(super) fn hit_contexts(
-    layout: &super::cache::CachedLayoutFacts,
-) -> Vec<HitContributionContext> {
+pub(super) fn hit_contexts(layout: &CachedLayoutFacts) -> Vec<HitContributionContext> {
     layout
         .bounds
         .iter()
         .map(|bounds| HitContributionContext::__runtime_new(bounds.size()))
         .collect()
+}
+
+/// Recoverable failure to derive a finite node-presentation publication product.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct PresentationGeometryError;
+
+pub(super) fn resolve_presentation(
+    layout: &CachedLayoutFacts,
+    styles: &CachedStyleFacts,
+) -> Result<CachedPresentationFacts, PresentationGeometryError> {
+    if layout.bounds.len() != styles.resolutions.len() {
+        return Err(PresentationGeometryError);
+    }
+    let mut nodes = Vec::with_capacity(layout.bounds.len());
+    for (bounds, style) in layout.bounds.iter().zip(&styles.resolutions) {
+        let node_presentation = style
+            .computed_style()
+            .presentation()
+            .map_or(Ok(LogicalTransform::IDENTITY), |presentation| {
+                presentation.resolve_in_box(bounds.size())
+            })
+            .map_err(|_| PresentationGeometryError)?;
+        let placement = LogicalTransform::translation(bounds.x(), bounds.y())
+            .map_err(|_| PresentationGeometryError)?;
+        let owner_to_surface = node_presentation
+            .then(placement)
+            .map_err(|_| PresentationGeometryError)?;
+        let local_bounds = LogicalRect::try_new(0.0, 0.0, bounds.width(), bounds.height())
+            .unwrap_or_else(|_| unreachable!("published layout size is valid"));
+        let owner_bounds = transform_rect_aabb(owner_to_surface, local_bounds)
+            .ok_or(PresentationGeometryError)?;
+        nodes.push(PresentationNodeFacts::new(owner_to_surface, owner_bounds));
+    }
+    Ok(CachedPresentationFacts { nodes })
 }
 
 #[derive(Clone, Copy)]
@@ -328,7 +363,8 @@ fn text_run_item(run: &runenui_text::TextRun, style: &StyleResolution) -> PaintC
 
 pub(super) fn resolve_paint(
     topology: &SurfaceTopologySnapshot,
-    layout: &super::cache::CachedLayoutFacts,
+    layout: &CachedLayoutFacts,
+    presentation: &CachedPresentationFacts,
     styles: &CachedStyleFacts,
     capabilities: &SurfaceCapabilityPlan,
     text_system: &mut TextSystem,
@@ -339,9 +375,7 @@ pub(super) fn resolve_paint(
     let mut ordered = Vec::new();
     let mut shaped_text_leases = Vec::new();
     for (mounted_preorder, node) in topology.nodes.iter().enumerate() {
-        let bounds = layout.bounds[mounted_preorder];
-        let owner_to_surface = LogicalTransform::translation(bounds.x(), bounds.y())
-            .unwrap_or_else(|_| unreachable!("published layout origin is finite"));
+        let owner_to_surface = presentation.node(mounted_preorder).owner_to_surface();
         let mut next_local_order = 0;
         if let Some(contribution) = capabilities.paint_at(mounted_preorder, &node.id) {
             for (contribution_local_order, item) in contribution.items().iter().enumerate() {
@@ -435,7 +469,7 @@ pub(super) struct ResolvedHitTest {
 
 pub(super) fn resolve_hit_test(
     topology: &SurfaceTopologySnapshot,
-    layout: &super::cache::CachedLayoutFacts,
+    presentation: &CachedPresentationFacts,
     capabilities: &SurfaceCapabilityPlan,
 ) -> ResolvedHitTest {
     #[cfg(test)]
@@ -447,9 +481,7 @@ pub(super) fn resolve_hit_test(
         let Some(contribution) = capabilities.hit_test_at(mounted_preorder, &node.id) else {
             continue;
         };
-        let bounds = layout.bounds[mounted_preorder];
-        let owner_to_surface = LogicalTransform::translation(bounds.x(), bounds.y())
-            .unwrap_or_else(|_| unreachable!("published layout origin is finite"));
+        let owner_to_surface = presentation.node(mounted_preorder).owner_to_surface();
         for (contribution_local_order, region) in contribution.regions().iter().enumerate() {
             let Ok(local_to_surface) = region.local_transform().then(owner_to_surface) else {
                 diagnostics[mounted_preorder].push(scene_transform_diagnostic(

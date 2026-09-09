@@ -75,3 +75,11 @@ macro_rules! opacity_token {
         $crate::OpacityToken::new($crate::token_id!($value))
     };
 }
+
+/// Creates a compile-time-validated typed node-presentation-transform-token reference.
+#[macro_export]
+macro_rules! presentation_token {
+    ($value:literal) => {
+        $crate::PresentationToken::new($crate::token_id!($value))
+    };
+}
