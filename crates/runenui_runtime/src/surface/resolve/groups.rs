@@ -98,6 +98,11 @@ struct GroupPlan {
     item_groups: Vec<Option<usize>>,
 }
 
+struct CompositionEntries {
+    grouped: Vec<Vec<(usize, PaintSceneEntry)>>,
+    root: Vec<(usize, PaintSceneEntry)>,
+}
+
 fn topology_parents(topology: &SurfaceTopologySnapshot) -> Vec<Option<usize>> {
     let index_by_id = topology
         .nodes
@@ -229,19 +234,16 @@ fn build_composition_entries(
     parents: &[Option<usize>],
     anchors: &[Option<usize>],
     candidate_to_scene: &[Option<PaintSceneGroupId>],
-) -> (
-    Vec<Vec<(usize, PaintSceneEntry)>>,
-    Vec<(usize, PaintSceneEntry)>,
-) {
+) -> CompositionEntries {
     let group_count = candidate_to_scene.iter().flatten().count();
-    let mut grouped_entries = vec![Vec::<(usize, PaintSceneEntry)>::new(); group_count];
-    let mut root_entries = Vec::<(usize, PaintSceneEntry)>::new();
+    let mut grouped = vec![Vec::<(usize, PaintSceneEntry)>::new(); group_count];
+    let mut root = Vec::<(usize, PaintSceneEntry)>::new();
     for (item_index, candidate) in item_groups.iter().copied().enumerate() {
         let entry = (item_index, PaintSceneEntry::item(item_index));
         if let Some(group) = candidate.and_then(|candidate| candidate_to_scene[candidate]) {
-            grouped_entries[group.index()].push(entry);
+            grouped[group.index()].push(entry);
         } else {
-            root_entries.push(entry);
+            root.push(entry);
         }
     }
 
@@ -254,16 +256,16 @@ fn build_composition_entries(
         let entry = (anchor, PaintSceneEntry::group(group));
         let parent = parents[candidate].and_then(|parent| candidate_to_scene[parent]);
         if let Some(parent) = parent {
-            grouped_entries[parent.index()].push(entry);
+            grouped[parent.index()].push(entry);
         } else {
-            root_entries.push(entry);
+            root.push(entry);
         }
     }
-    for entries in &mut grouped_entries {
+    for entries in &mut grouped {
         entries.sort_by_key(|(anchor, _)| *anchor);
     }
-    root_entries.sort_by_key(|(anchor, _)| *anchor);
-    (grouped_entries, root_entries)
+    root.sort_by_key(|(anchor, _)| *anchor);
+    CompositionEntries { grouped, root }
 }
 
 fn publish_groups(
@@ -363,7 +365,7 @@ pub(super) fn derive_composition_groups(
     for (item, candidate) in items.iter_mut().zip(&item_groups) {
         item.set_group(candidate.and_then(|candidate| candidate_to_scene[candidate]));
     }
-    let (grouped_entries, root_entries) =
+    let CompositionEntries { grouped, root } =
         build_composition_entries(&item_groups, &parents, &anchors, &candidate_to_scene);
     let groups = publish_groups(
         styles,
@@ -371,9 +373,9 @@ pub(super) fn derive_composition_groups(
         sources,
         &parents,
         &candidate_to_scene,
-        grouped_entries,
+        grouped,
     );
-    let root_entries = root_entries.into_iter().map(|(_, entry)| entry).collect();
+    let root_entries = root.into_iter().map(|(_, entry)| entry).collect();
     (items, PaintSceneComposition::new(groups, root_entries))
 }
 
