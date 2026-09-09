@@ -3,6 +3,7 @@
 mod brush;
 mod image;
 mod outline;
+mod presentation;
 mod shadow;
 mod stroke;
 
@@ -16,5 +17,9 @@ pub use image::{
     ImageSourceInsetsError,
 };
 pub use outline::Outline;
+pub use presentation::{
+    PresentationOrigin, PresentationRotation, PresentationScalarError, PresentationScale,
+    PresentationTransform, PresentationTranslation,
+};
 pub use shadow::{DropShadow, NonFiniteVisualScalar};
 pub use stroke::{StrokeCap, StrokeJoin, StrokeStyle, StrokeStyleError};
