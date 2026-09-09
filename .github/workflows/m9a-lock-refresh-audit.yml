@@ -29,6 +29,21 @@ jobs:
 
           bounds_path = Path("crates/runenui_runtime/src/paint_bounds.rs")
           bounds = bounds_path.read_text()
+
+          exhaustive_old = '''            (bounds, transform)
+                  }
+              };
+          '''
+          exhaustive_new = '''            (bounds, transform)
+                  }
+                  _ => (PaintSceneBounds::Unbounded, item.local_to_surface()),
+              };
+          '''
+          if exhaustive_old in bounds:
+              bounds = bounds.replace(exhaustive_old, exhaustive_new, 1)
+          elif exhaustive_new not in bounds:
+              raise SystemExit("paint primitive match no longer matches reviewed authority")
+
           old = '''        SceneShape::Rect(rect)
                   | SceneShape::RoundedRect { rect, .. }
                   | SceneShape::Ellipse(rect) => {
