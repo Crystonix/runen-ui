@@ -176,7 +176,7 @@ fn derive_group_plan(
         let candidate = explicit_candidates[explicit_index];
         parents[candidate] = explicit.parent.map_or_else(
             || nearest_node_group(Some(explicit.owner), &topology_parent, &node_groups),
-            |parent| explicit_candidates[parent.index()],
+            |parent| Some(explicit_candidates[parent.index()]),
         );
     }
 
@@ -187,7 +187,7 @@ fn derive_group_plan(
         .map(|(owner, explicit)| {
             explicit.map_or_else(
                 || nearest_node_group(Some(owner), &topology_parent, &node_groups),
-                |explicit| explicit_candidates[explicit.index()],
+                |explicit| Some(explicit_candidates[explicit.index()]),
             )
         })
         .collect::<Vec<_>>();
@@ -268,7 +268,7 @@ pub(super) fn derive_composition_groups(
     }
 
     for (item, candidate) in items.iter_mut().zip(&item_groups) {
-        item.set_group(candidate.and_then(|candidate| candidate_to_scene[*candidate]));
+        item.set_group(candidate.and_then(|candidate| candidate_to_scene[candidate]));
     }
 
     let mut grouped_entries = vec![Vec::<(usize, PaintSceneEntry)>::new(); group_count];
