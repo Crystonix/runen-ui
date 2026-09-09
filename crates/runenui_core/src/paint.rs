@@ -1,9 +1,10 @@
 //! Renderer-neutral owner-local paint contribution vocabulary.
 
+use crate::paint_group::{NormalizedPaintGroup, PaintContributionEntry, normalize_entries};
 use crate::{
-    Brush, Color, ComputedStyle, ContributionClip, ImageIntrinsicSize, ImagePaintDescriptor,
-    LogicalPoint, LogicalRect, LogicalSize, LogicalTransform, ResourceKind, ResourceKindMismatch,
-    ResourceRef, SceneLayer, SceneOpacity, SceneShape, StrokeStyle,
+    Brush, Color, ComputedStyle, ContributionClip, DropShadow, ImageIntrinsicSize,
+    ImagePaintDescriptor, LogicalPoint, LogicalRect, LogicalSize, LogicalTransform, ResourceKind,
+    ResourceKindMismatch, ResourceRef, SceneLayer, SceneOpacity, SceneShape, StrokeStyle,
 };
 
 /// Read-only facts supplied while one mounted widget contributes paint.
@@ -41,28 +42,57 @@ impl PaintContributionContext {
 }
 
 /// Ordered immutable paint fragment authored in one widget's local logical space.
+///
+/// Ordinary flat contributions keep no group metadata. Explicit recursive authoring
+/// is normalized immediately by [`Self::from_entries`] into this same flat item order
+/// plus private transient group facts; the recursive authoring tree is not retained.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PaintContribution {
     items: Vec<PaintContributionItem>,
+    groups: Vec<NormalizedPaintGroup>,
+    item_groups: Vec<Option<usize>>,
 }
 
 impl PaintContribution {
     /// Empty contribution.
     #[must_use]
     pub const fn empty() -> Self {
-        Self { items: Vec::new() }
+        Self {
+            items: Vec::new(),
+            groups: Vec::new(),
+            item_groups: Vec::new(),
+        }
     }
 
-    /// Creates one contribution from already validated items in local order.
+    /// Creates one flat contribution from already validated items in local order.
     #[must_use]
     pub const fn new(items: Vec<PaintContributionItem>) -> Self {
-        Self { items }
+        Self {
+            items,
+            groups: Vec::new(),
+            item_groups: Vec::new(),
+        }
     }
 
-    /// Creates a one-item contribution.
+    /// Creates one contribution from recursive owner-local item/group authoring.
+    ///
+    /// The structure is consumed immediately. Items are retained in exact recursive
+    /// authored order while structurally empty groups are omitted and remaining group
+    /// membership becomes private contribution-local numeric structure only.
+    #[must_use]
+    pub fn from_entries(entries: Vec<PaintContributionEntry>) -> Self {
+        let normalized = normalize_entries(entries);
+        Self {
+            items: normalized.items,
+            groups: normalized.groups,
+            item_groups: normalized.item_groups,
+        }
+    }
+
+    /// Creates a one-item flat contribution.
     #[must_use]
     pub fn single(item: PaintContributionItem) -> Self {
-        Self { items: vec![item] }
+        Self::new(vec![item])
     }
 
     /// Returns contribution items in exact authored order.
@@ -75,6 +105,56 @@ impl PaintContribution {
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.items.is_empty()
+    }
+
+    /// Runtime-only count of normalized owner-local groups.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn __runtime_group_count(&self) -> usize {
+        self.groups.len()
+    }
+
+    /// Runtime-only normalized parent ordinal for one owner-local group.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn __runtime_group_parent(&self, group_index: usize) -> Option<usize> {
+        self.groups.get(group_index).and_then(|group| group.parent)
+    }
+
+    /// Runtime-only owner-local clips for one normalized group.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn __runtime_group_clips(&self, group_index: usize) -> Option<&[ContributionClip]> {
+        self.groups
+            .get(group_index)
+            .map(|group| group.clips.as_slice())
+    }
+
+    /// Runtime-only validated opacity for one normalized group.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn __runtime_group_opacity(&self, group_index: usize) -> Option<SceneOpacity> {
+        self.groups.get(group_index).map(|group| group.opacity)
+    }
+
+    /// Runtime-only ordered ordinary shadows for one normalized group.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn __runtime_group_shadows(&self, group_index: usize) -> Option<&[DropShadow]> {
+        self.groups
+            .get(group_index)
+            .map(|group| group.shadows.as_slice())
+    }
+
+    /// Runtime-only immediate normalized group ordinal for one flat item.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn __runtime_item_group(&self, item_index: usize) -> Option<usize> {
+        if self.item_groups.is_empty() {
+            None
+        } else {
+            self.item_groups.get(item_index).copied().flatten()
+        }
     }
 }
 
@@ -518,6 +598,8 @@ mod tests {
             contribution.items()[1].primitive().stroke_style(),
             Some(stroke)
         );
+        assert_eq!(contribution.__runtime_group_count(), 0);
+        assert_eq!(contribution.__runtime_item_group(0), None);
     }
 
     #[test]
