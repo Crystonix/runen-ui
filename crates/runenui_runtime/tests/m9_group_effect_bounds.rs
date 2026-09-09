@@ -117,8 +117,8 @@ fn negative_spread() -> PaintContribution {
 }
 
 fn zero_opacity() -> PaintContribution {
-    let group = PaintContributionGroup::new(vec![leaf().into()])
-        .with_opacity(SceneOpacity::TRANSPARENT);
+    let group =
+        PaintContributionGroup::new(vec![leaf().into()]).with_opacity(SceneOpacity::TRANSPARENT);
     PaintContribution::from_entries(vec![group.into()])
 }
 
