@@ -63,8 +63,8 @@ fn static_presentation_translation_correlates_paint_hit_and_semantic_geometry_wi
         .root()
         .unwrap_or_else(|| unreachable!("published app has one root"))
         .bounds();
-    let expected_tx = layout.x() + 10.0;
-    let expected_ty = layout.y() + 20.0;
+    let expected_left = layout.x() + 10.0;
+    let expected_top = layout.y() + 20.0;
 
     let paint = publication
         .paint_scene()
@@ -84,8 +84,8 @@ fn static_presentation_translation_correlates_paint_hit_and_semantic_geometry_wi
     approx_eq(m12, 0.0);
     approx_eq(m21, 0.0);
     approx_eq(m22, 1.0);
-    approx_eq(tx, expected_tx);
-    approx_eq(ty, expected_ty);
+    approx_eq(tx, expected_left);
+    approx_eq(ty, expected_top);
 
     let semantic = publication
         .semantic_publication()
@@ -95,14 +95,14 @@ fn static_presentation_translation_correlates_paint_hit_and_semantic_geometry_wi
         .find(|node| node.name() == Some("translated"))
         .unwrap_or_else(|| unreachable!("button publishes one semantic node"));
     let semantic_bounds = semantic.bounds();
-    approx_eq(semantic_bounds.x(), expected_tx);
-    approx_eq(semantic_bounds.y(), expected_ty);
+    approx_eq(semantic_bounds.x(), expected_left);
+    approx_eq(semantic_bounds.y(), expected_top);
     approx_eq(semantic_bounds.width(), layout.width());
     approx_eq(semantic_bounds.height(), layout.height());
 
     let hit_point = LogicalPoint::new(
-        semantic_bounds.x() + semantic_bounds.width() * 0.5,
-        semantic_bounds.y() + semantic_bounds.height() * 0.5,
+        semantic_bounds.width().mul_add(0.5, semantic_bounds.x()),
+        semantic_bounds.height().mul_add(0.5, semantic_bounds.y()),
     )
     .unwrap_or_else(|_| unreachable!("controlled hit point is finite"));
     assert_eq!(
