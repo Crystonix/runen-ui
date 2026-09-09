@@ -116,7 +116,7 @@ fn topology_parents(topology: &SurfaceTopologySnapshot) -> Vec<Option<usize>> {
         .collect()
 }
 
-fn nearest_node_group(
+const fn nearest_node_group(
     mut cursor: Option<usize>,
     parent: &[Option<usize>],
     node_groups: &[Option<usize>],
@@ -210,6 +210,104 @@ fn derive_group_plan(
     }
 }
 
+fn scene_group_ids(anchors: &[Option<usize>]) -> Vec<Option<PaintSceneGroupId>> {
+    let mut next_group = 0;
+    anchors
+        .iter()
+        .map(|anchor| {
+            anchor.map(|_| {
+                let group = PaintSceneGroupId::new(next_group);
+                next_group += 1;
+                group
+            })
+        })
+        .collect()
+}
+
+fn build_composition_entries(
+    item_groups: &[Option<usize>],
+    parents: &[Option<usize>],
+    anchors: &[Option<usize>],
+    candidate_to_scene: &[Option<PaintSceneGroupId>],
+) -> (Vec<Vec<(usize, PaintSceneEntry)>>, Vec<(usize, PaintSceneEntry)>) {
+    let group_count = candidate_to_scene.iter().flatten().count();
+    let mut grouped_entries = vec![Vec::<(usize, PaintSceneEntry)>::new(); group_count];
+    let mut root_entries = Vec::<(usize, PaintSceneEntry)>::new();
+    for (item_index, candidate) in item_groups.iter().copied().enumerate() {
+        let entry = (item_index, PaintSceneEntry::item(item_index));
+        if let Some(group) = candidate.and_then(|candidate| candidate_to_scene[candidate]) {
+            grouped_entries[group.index()].push(entry);
+        } else {
+            root_entries.push(entry);
+        }
+    }
+
+    for candidate in 0..candidate_to_scene.len() {
+        let Some(group) = candidate_to_scene[candidate] else {
+            continue;
+        };
+        let anchor = anchors[candidate]
+            .unwrap_or_else(|| unreachable!("published group has a descendant anchor"));
+        let entry = (anchor, PaintSceneEntry::group(group));
+        let parent = parents[candidate].and_then(|parent| candidate_to_scene[parent]);
+        if let Some(parent) = parent {
+            grouped_entries[parent.index()].push(entry);
+        } else {
+            root_entries.push(entry);
+        }
+    }
+    for entries in &mut grouped_entries {
+        entries.sort_by_key(|(anchor, _)| *anchor);
+    }
+    root_entries.sort_by_key(|(anchor, _)| *anchor);
+    (grouped_entries, root_entries)
+}
+
+fn publish_groups(
+    styles: &CachedStyleFacts,
+    explicit_groups: &[ResolvedExplicitGroup],
+    sources: Vec<GroupSource>,
+    parents: &[Option<usize>],
+    candidate_to_scene: &[Option<PaintSceneGroupId>],
+    mut grouped_entries: Vec<Vec<(usize, PaintSceneEntry)>>,
+) -> Vec<PaintSceneGroup> {
+    let mut groups = Vec::with_capacity(grouped_entries.len());
+    for (candidate, source) in sources.into_iter().enumerate() {
+        let Some(group) = candidate_to_scene[candidate] else {
+            continue;
+        };
+        let parent = parents[candidate].and_then(|parent| candidate_to_scene[parent]);
+        let entries = std::mem::take(&mut grouped_entries[group.index()])
+            .into_iter()
+            .map(|(_, entry)| entry)
+            .collect();
+        let published = match source {
+            GroupSource::Node(node) => {
+                let computed = styles.resolutions[node].computed_style();
+                PaintSceneGroup::new(
+                    parent,
+                    entries,
+                    Vec::new(),
+                    computed.opacity(),
+                    computed.shadows().to_vec(),
+                )
+            }
+            GroupSource::Explicit(explicit) => {
+                let explicit = &explicit_groups[explicit.index()];
+                PaintSceneGroup::new(
+                    parent,
+                    entries,
+                    explicit.clips.clone(),
+                    explicit.opacity,
+                    explicit.shadows.clone(),
+                )
+            }
+        };
+        groups.push(published);
+    }
+    groups
+}
+
 /// Applies accepted ADR 0012 node and explicit owner-local grouping to one exact
 /// inherited M6 pre-group item sequence.
 ///
@@ -253,16 +351,8 @@ pub(super) fn derive_composition_groups(
         &item_owners,
         &item_explicit_groups,
     );
-
-    let mut candidate_to_scene = vec![None; sources.len()];
-    let mut group_count = 0;
-    for (candidate, anchor) in anchors.iter().enumerate() {
-        if anchor.is_some() {
-            candidate_to_scene[candidate] = Some(PaintSceneGroupId::new(group_count));
-            group_count += 1;
-        }
-    }
-    if group_count == 0 {
+    let candidate_to_scene = scene_group_ids(&anchors);
+    if candidate_to_scene.iter().all(Option::is_none) {
         let item_count = items.len();
         return (items, PaintSceneComposition::ungrouped(item_count));
     }
@@ -270,72 +360,16 @@ pub(super) fn derive_composition_groups(
     for (item, candidate) in items.iter_mut().zip(&item_groups) {
         item.set_group(candidate.and_then(|candidate| candidate_to_scene[candidate]));
     }
-
-    let mut grouped_entries = vec![Vec::<(usize, PaintSceneEntry)>::new(); group_count];
-    let mut root_entries = Vec::<(usize, PaintSceneEntry)>::new();
-    for (item_index, candidate) in item_groups.iter().copied().enumerate() {
-        let entry = (item_index, PaintSceneEntry::item(item_index));
-        if let Some(group) = candidate.and_then(|candidate| candidate_to_scene[candidate]) {
-            grouped_entries[group.index()].push(entry);
-        } else {
-            root_entries.push(entry);
-        }
-    }
-
-    for candidate in 0..sources.len() {
-        let Some(group) = candidate_to_scene[candidate] else {
-            continue;
-        };
-        let anchor = anchors[candidate]
-            .unwrap_or_else(|| unreachable!("published group has a descendant anchor"));
-        let entry = (anchor, PaintSceneEntry::group(group));
-        let parent = parents[candidate].and_then(|parent| candidate_to_scene[parent]);
-        if let Some(parent) = parent {
-            grouped_entries[parent.index()].push(entry);
-        } else {
-            root_entries.push(entry);
-        }
-    }
-    for entries in &mut grouped_entries {
-        entries.sort_by_key(|(anchor, _)| *anchor);
-    }
-    root_entries.sort_by_key(|(anchor, _)| *anchor);
-
-    let mut groups = Vec::with_capacity(group_count);
-    for (candidate, source) in sources.into_iter().enumerate() {
-        let Some(group) = candidate_to_scene[candidate] else {
-            continue;
-        };
-        let parent = parents[candidate].and_then(|parent| candidate_to_scene[parent]);
-        let entries = std::mem::take(&mut grouped_entries[group.index()])
-            .into_iter()
-            .map(|(_, entry)| entry)
-            .collect();
-        let published = match source {
-            GroupSource::Node(node) => {
-                let computed = styles.resolutions[node].computed_style();
-                PaintSceneGroup::new(
-                    parent,
-                    entries,
-                    Vec::new(),
-                    computed.opacity(),
-                    computed.shadows().to_vec(),
-                )
-            }
-            GroupSource::Explicit(explicit) => {
-                let explicit = &explicit_groups[explicit.index()];
-                PaintSceneGroup::new(
-                    parent,
-                    entries,
-                    explicit.clips.clone(),
-                    explicit.opacity,
-                    explicit.shadows.clone(),
-                )
-            }
-        };
-        groups.push(published);
-    }
-
+    let (grouped_entries, root_entries) =
+        build_composition_entries(&item_groups, &parents, &anchors, &candidate_to_scene);
+    let groups = publish_groups(
+        styles,
+        explicit_groups,
+        sources,
+        &parents,
+        &candidate_to_scene,
+        grouped_entries,
+    );
     let root_entries = root_entries.into_iter().map(|(_, entry)| entry).collect();
     (items, PaintSceneComposition::new(groups, root_entries))
 }
