@@ -1,10 +1,10 @@
 use runenui_core::{
-    __runtime::transform_rect_aabb, ImagePrimitive, LogicalRect, LogicalTransform, PaintPrimitive,
-    SceneShape, StrokeCap, StrokeJoin, StrokeStyle,
+    __runtime::transform_rect_aabb, DropShadow, ImagePrimitive, LogicalRect, LogicalTransform,
+    PaintPrimitive, SceneShape, StrokeCap, StrokeJoin, StrokeStyle,
 };
 use runenui_text::TextInkBounds;
 
-use crate::scene::{PaintScene, PaintSceneItem, SceneClip};
+use crate::scene::{PaintScene, PaintSceneEntry, PaintSceneGroupId, PaintSceneItem, SceneClip};
 
 /// Conservative surface-logical coverage bound derived from one immutable paint snapshot.
 ///
@@ -58,6 +58,19 @@ impl PaintScene {
             .get(item_index)
             .map(|item| derive_item_bounds(self, item))
     }
+
+    /// Derives one composition group's complete conservative surface-logical output bound.
+    ///
+    /// Direct items and nested groups first compose recursively into one pre-shadow child bound.
+    /// Every ordinary shadow derives independently from that same child bound. Positive spread
+    /// expands conservatively, zero/negative spread retain the child AABB when no tighter neutral
+    /// erosion bound is available, then offset and finite `3 * sigma` support apply. Group clips
+    /// constrain the complete child-plus-effects result. Group opacity and shadow color alpha do
+    /// not shrink this geometric metadata or create a second source-alpha authority.
+    #[must_use]
+    pub fn group_bounds(&self, group_id: PaintSceneGroupId) -> Option<PaintSceneBounds> {
+        derive_group_bounds(self, group_id)
+    }
 }
 
 fn derive_item_bounds(scene: &PaintScene, item: &PaintSceneItem) -> PaintSceneBounds {
@@ -96,6 +109,57 @@ fn derive_item_bounds(scene: &PaintScene, item: &PaintSceneItem) -> PaintSceneBo
         }
     }
     bounds
+}
+
+fn derive_group_bounds(
+    scene: &PaintScene,
+    group_id: PaintSceneGroupId,
+) -> Option<PaintSceneBounds> {
+    let group = scene.group(group_id)?;
+    let mut child_bounds = PaintSceneBounds::Empty;
+    for entry in group.entries() {
+        child_bounds = union_bounds(child_bounds, entry_bounds(scene, *entry));
+    }
+
+    let mut bounds = child_bounds;
+    for shadow in group.shadows() {
+        bounds = union_bounds(bounds, shadow_effect_bounds(child_bounds, *shadow));
+    }
+    for clip in group.clips() {
+        bounds = intersect_bounds(bounds, clip_bounds(clip));
+        if bounds.is_empty() {
+            break;
+        }
+    }
+    Some(bounds)
+}
+
+fn entry_bounds(scene: &PaintScene, entry: PaintSceneEntry) -> PaintSceneBounds {
+    if let Some(item_index) = entry.item_index() {
+        return scene
+            .item_bounds(item_index)
+            .unwrap_or(PaintSceneBounds::Unbounded);
+    }
+    if let Some(group_id) = entry.group_id() {
+        return derive_group_bounds(scene, group_id).unwrap_or(PaintSceneBounds::Unbounded);
+    }
+    PaintSceneBounds::Unbounded
+}
+
+fn shadow_effect_bounds(source: PaintSceneBounds, shadow: DropShadow) -> PaintSceneBounds {
+    let spread = shadow.spread();
+    let spread_bounds = if spread > 0.0 {
+        expand_bounds(source, f64::from(spread))
+    } else {
+        source
+    };
+
+    let Ok(offset) = LogicalTransform::translation(shadow.offset_x(), shadow.offset_y()) else {
+        return PaintSceneBounds::Unbounded;
+    };
+    let offset_bounds = transform_bounds(spread_bounds, offset);
+    let blur_margin = 3.0 * f64::from(shadow.sigma().get());
+    expand_bounds(offset_bounds, blur_margin)
 }
 
 fn fill_shape_bounds(shape: &SceneShape) -> PaintSceneBounds {
@@ -234,6 +298,16 @@ fn intersect_bounds(left: PaintSceneBounds, right: PaintSceneBounds) -> PaintSce
                 logical_rect_from_edges(min_x, min_y, max_x, max_y)
                     .map_or(PaintSceneBounds::Unbounded, PaintSceneBounds::Finite)
             }
+        }
+    }
+}
+
+fn expand_bounds(bounds: PaintSceneBounds, margin: f64) -> PaintSceneBounds {
+    match bounds {
+        PaintSceneBounds::Empty => PaintSceneBounds::Empty,
+        PaintSceneBounds::Unbounded => PaintSceneBounds::Unbounded,
+        PaintSceneBounds::Finite(rect) => {
+            expand_rect(rect, margin).map_or(PaintSceneBounds::Unbounded, PaintSceneBounds::Finite)
         }
     }
 }
