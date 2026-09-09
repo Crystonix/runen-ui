@@ -375,8 +375,10 @@ pub use visual::{
     Brush, DropShadow, GradientGeometryError, GradientStop, GradientStops, GradientStopsError,
     ImageAlignment, ImageCrop, ImageCropError, ImageDescriptor, ImageDestinationInsets, ImageFit,
     ImageIntrinsicSize, ImageMapping, ImageMappingError, ImagePaintDescriptor, ImageSourceInsets,
-    ImageSourceInsetsError, LinearGradient, NonFiniteVisualScalar, Outline, RadialGradient,
-    StrokeCap, StrokeJoin, StrokeStyle, StrokeStyleError, UnitInterval, UnitIntervalError,
+    ImageSourceInsetsError, LinearGradient, NonFiniteVisualScalar, Outline, PresentationOrigin,
+    PresentationRotation, PresentationScalarError, PresentationScale, PresentationTransform,
+    PresentationTranslation, RadialGradient, StrokeCap, StrokeJoin, StrokeStyle, StrokeStyleError,
+    UnitInterval, UnitIntervalError,
 };
 pub use visual_style::{OpacityValue, OutlineValue, ShadowValue};
 pub use widget_context::{
