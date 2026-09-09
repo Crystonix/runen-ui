@@ -229,7 +229,10 @@ fn build_composition_entries(
     parents: &[Option<usize>],
     anchors: &[Option<usize>],
     candidate_to_scene: &[Option<PaintSceneGroupId>],
-) -> (Vec<Vec<(usize, PaintSceneEntry)>>, Vec<(usize, PaintSceneEntry)>) {
+) -> (
+    Vec<Vec<(usize, PaintSceneEntry)>>,
+    Vec<(usize, PaintSceneEntry)>,
+) {
     let group_count = candidate_to_scene.iter().flatten().count();
     let mut grouped_entries = vec![Vec::<(usize, PaintSceneEntry)>::new(); group_count];
     let mut root_entries = Vec::<(usize, PaintSceneEntry)>::new();
