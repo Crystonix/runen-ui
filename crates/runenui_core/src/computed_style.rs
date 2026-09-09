@@ -34,7 +34,7 @@ impl ComputedStyle {
             && self.typography.is_none()
             && self.outline.is_none()
             && self.shadows.is_empty()
-            && self.opacity.get() == SceneOpacity::OPAQUE.get()
+            && self.opacity.get().to_bits() == SceneOpacity::OPAQUE.get().to_bits()
     }
     #[must_use]
     pub const fn with_foreground(mut self, value: Color) -> Self {
@@ -107,27 +107,5 @@ impl ComputedStyle {
     #[must_use]
     pub const fn opacity(&self) -> SceneOpacity {
         self.opacity
-    }
-
-    pub(crate) const fn from_parts(
-        foreground: Option<Color>,
-        background: Option<Brush>,
-        padding: Option<EdgeInsets>,
-        radius: Option<Radius>,
-        typography: Option<Typography>,
-        outline: Option<Outline>,
-        shadows: Vec<DropShadow>,
-        opacity: SceneOpacity,
-    ) -> Self {
-        Self {
-            foreground,
-            background,
-            padding,
-            radius,
-            typography,
-            outline,
-            shadows,
-            opacity,
-        }
     }
 }
