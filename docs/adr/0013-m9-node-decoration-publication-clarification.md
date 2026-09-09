@@ -111,12 +111,20 @@ Therefore a negative-layer widget item may precede the layer-zero background and
 positive-layer widget item may follow the layer-zero outline. No node-decoration
 z-index or renderer re-sort is introduced.
 
-### Groups and effects consume decoration as ordinary child paint
+### Group ownership remains unchanged
 
-Background and outline participate in enclosing runtime node-effect groups and
-explicit ancestor composition groups exactly as other admitted node-owned paint does.
-They contribute to the group's pre-shadow composed child coverage through the same
-ordinary item-bound authority.
+Background and outline participate in an enclosing runtime-derived node-effect group
+exactly like other paint owned by that mounted node, so they contribute through the
+ordinary item-bound authority to that group's pre-shadow composed child coverage.
+Ancestor runtime node-effect groups likewise capture them through mounted-subtree
+scope.
+
+They are **not** members of widget-authored explicit owner-local groups. Those groups
+remain structurally limited to entries of the exact `PaintContribution` that authored
+them, as frozen by ADR 0012 and the accepted M9A explicit-group checkpoint.
+Runtime-synthesized decoration therefore follows the same separation already required
+for runtime-shaped text: outside explicit widget groups, while still captured by any
+enclosing runtime node-effect group.
 
 The outline itself does not create isolation. Node opacity/shadow group existence and
 shadow derivation remain controlled by ADR 0012 and ADR 0011 respectively.
@@ -140,6 +148,8 @@ ordering semantics.
 - renderer realization receives only ordinary generic fill/stroke items and needs no
   node-decoration-specific backend contract;
 - item/group bound logic requires no parallel decoration geometry model;
+- explicit widget groups retain their already-accepted owner-local membership
+  boundary;
 - M6 layer/order authority is preserved rather than replaced by CSS-like implicit
   background/outline stacking.
 
@@ -154,6 +164,12 @@ Rejected because it leaves two ownership paths for common node decoration and ke
 
 Rejected because that silently overrides inherited M6 `SceneLayer` authority and
 creates a second stacking model.
+
+### Let runtime decoration enter widget-authored explicit groups
+
+Rejected because explicit owner-local groups own only structure authored by their
+exact `PaintContribution`; admitting runtime decoration would weaken the already
+accepted no-foreign-member boundary and diverge from runtime-shaped text.
 
 ### Let the renderer infer the decorated node box/radius
 
