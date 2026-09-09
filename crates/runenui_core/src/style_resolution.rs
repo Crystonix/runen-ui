@@ -518,20 +518,47 @@ impl ResolutionBuilder {
     }
 
     fn finish(self) -> StyleResolution {
+        let Self {
+            foreground,
+            background,
+            padding,
+            radius,
+            typography,
+            outline,
+            shadows,
+            opacity,
+            provenance,
+            unresolved_tokens,
+            diagnostics,
+        } = self;
+
+        let mut computed_style = ComputedStyle::EMPTY
+            .with_shadows(shadows.unwrap_or_default())
+            .with_opacity(opacity.unwrap_or(SceneOpacity::OPAQUE));
+        if let Some(value) = foreground {
+            computed_style = computed_style.with_foreground(value);
+        }
+        if let Some(value) = background {
+            computed_style = computed_style.with_background(value);
+        }
+        if let Some(value) = padding {
+            computed_style = computed_style.with_padding(value);
+        }
+        if let Some(value) = radius {
+            computed_style = computed_style.with_radius(value);
+        }
+        if let Some(value) = typography {
+            computed_style = computed_style.with_typography(value);
+        }
+        if let Some(value) = outline {
+            computed_style = computed_style.with_outline(value);
+        }
+
         StyleResolution::new(
-            ComputedStyle::from_parts(
-                self.foreground,
-                self.background,
-                self.padding,
-                self.radius,
-                self.typography,
-                self.outline,
-                self.shadows.unwrap_or_default(),
-                self.opacity.unwrap_or(SceneOpacity::OPAQUE),
-            ),
-            self.provenance,
-            self.unresolved_tokens,
-            self.diagnostics,
+            computed_style,
+            provenance,
+            unresolved_tokens,
+            diagnostics,
         )
     }
 }
