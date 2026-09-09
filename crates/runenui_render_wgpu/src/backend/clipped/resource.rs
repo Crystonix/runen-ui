@@ -9,7 +9,10 @@ use crate::{
     WgpuHasDisplayHandle,
     lineage::PublicationLineage,
     observation::{ResourceCacheOutcome, ResourceObservation, ResourceRealizationKind},
-    scene_subset::{SceneValidationError, UnsupportedSceneSemantic, validate_literal_rect_item},
+    scene_subset::{
+        SceneValidationError, UnsupportedSceneSemantic, validate_item_composition,
+        validate_literal_rect_item,
+    },
 };
 
 use super::super::{
@@ -1145,6 +1148,7 @@ fn validate_resource_scene_subset(
             });
     let mut items = Vec::with_capacity(publication.scene().items().len());
     for (item_index, item) in publication.scene().items().iter().enumerate() {
+        validate_item_composition(item_index, item)?;
         if let PaintPrimitive::Image(image_primitive) = item.primitive() {
             let Some(intrinsic_size) = image_primitive.resolved_intrinsic_size() else {
                 return Err(SceneValidationError::UnsupportedItem {
@@ -1608,10 +1612,92 @@ fn encode_resource_shaped_run_item(
 
 #[cfg(test)]
 mod tests {
-    use runenui_core::LogicalSize;
-    use runenui_runtime::RasterScale;
+    use runenui_core::{
+        Element, ImageDescriptor, ImageIntrinsicSize, ImageMapping, ImagePaintDescriptor,
+        IntoEffects, LogicalLength, LogicalRect, LogicalSize, NoHostProtocol, PaintContribution,
+        PaintContributionContext, PaintContributionItem, PaintPrimitive, ResourceKind, ResourceRef,
+        SceneOpacity, StyleEnvironment, UiApp, View, Widget, WidgetMeasure, WidgetMeasureInput,
+    };
+    use runenui_runtime::{AppRuntime, LayoutConstraints, RasterScale, SurfaceBuildContext};
 
-    use super::{OffscreenExtent, surface_canvas_extent};
+    use super::{
+        OffscreenExtent, SceneValidationError, UnsupportedSceneSemantic, surface_canvas_extent,
+        validate_resource_scene_subset,
+    };
+
+    #[derive(Debug)]
+    struct ImagePaint;
+
+    impl Widget<()> for ImagePaint {
+        type State = ();
+
+        fn create_state(&self) -> Self::State {}
+
+        fn measure(&self, _: &Self::State, _: WidgetMeasureInput) -> WidgetMeasure {
+            WidgetMeasure::measured(LogicalLength::from(20_u16), LogicalLength::from(20_u16))
+        }
+
+        fn paint(&self, _: &Self::State, _: PaintContributionContext) -> PaintContribution {
+            let resource = ResourceRef::new(ResourceKind::Image);
+            let image = ImageDescriptor::new(
+                resource,
+                ImageIntrinsicSize::new(1, 1)
+                    .unwrap_or_else(|| unreachable!("controlled intrinsic size is non-zero")),
+            )
+            .unwrap_or_else(|_| unreachable!("controlled resource has image kind"));
+            let destination = LogicalRect::try_new(0.0, 0.0, 20.0, 20.0)
+                .unwrap_or_else(|_| unreachable!("controlled destination is valid"));
+            let descriptor = ImagePaintDescriptor::new(image, destination, ImageMapping::default())
+                .unwrap_or_else(|_| unreachable!("controlled image mapping is valid"));
+            PaintContribution::single(PaintContributionItem::image(descriptor))
+        }
+    }
+
+    struct GroupedImageApp;
+
+    impl UiApp for GroupedImageApp {
+        type State = ();
+        type Action = ();
+        type HostProtocol = NoHostProtocol;
+
+        fn root(_: &Self::State) -> impl View<Self::Action> {
+            Element::new(ImagePaint).opacity(
+                SceneOpacity::new(0.5)
+                    .unwrap_or_else(|_| unreachable!("controlled opacity is valid")),
+            )
+        }
+
+        fn update(
+            _: &mut Self::State,
+            _: Self::Action,
+        ) -> impl IntoEffects<Self::Action, Self::HostProtocol> {
+        }
+    }
+
+    #[test]
+    fn resource_scene_preflight_rejects_grouped_image_before_primitive_dispatch() {
+        let mut runtime = AppRuntime::<GroupedImageApp>::mount(());
+        let environment = StyleEnvironment::default();
+        let publication = runtime
+            .publish_surface(&SurfaceBuildContext::new(
+                &environment,
+                LayoutConstraints::unbounded(),
+            ))
+            .unwrap_or_else(|_| unreachable!("controlled publication is admitted"));
+        assert_eq!(publication.paint_scene().groups().len(), 1);
+        assert!(matches!(
+            publication.paint_scene().items()[0].primitive(),
+            PaintPrimitive::Image(_)
+        ));
+
+        assert_eq!(
+            validate_resource_scene_subset(publication.paint_publication()),
+            Err(SceneValidationError::UnsupportedItem {
+                item_index: 0,
+                semantic: UnsupportedSceneSemantic::CompositionGroup,
+            })
+        );
+    }
 
     #[test]
     fn native_surface_extent_is_not_reconstructed_from_fractional_scale() {

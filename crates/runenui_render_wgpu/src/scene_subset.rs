@@ -18,6 +18,7 @@ pub enum UnsupportedSceneSemantic {
     NonEmptyClips,
     EllipseClip,
     PathClip,
+    CompositionGroup,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -83,15 +84,35 @@ pub(crate) fn publication_resource_error(
         })
 }
 
+/// Fails closed while the current wgpu implementation cannot realize atomic
+/// composition groups. This is renderer capability admission only; the runtime
+/// scene remains the complete neutral authority.
+pub(crate) const fn validate_item_composition(
+    item_index: usize,
+    item: &PaintSceneItem,
+) -> Result<(), SceneValidationError> {
+    if item.group().is_some() {
+        Err(unsupported(
+            item_index,
+            UnsupportedSceneSemantic::CompositionGroup,
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 /// Validates one currently realized generic fill/stroke item without applying
 /// the temporary base-renderer clip gate.
 ///
 /// Generic public semantics are not narrowed here: unsupported shapes, brushes,
-/// and stroke styles fail closed until their M9A realization lands.
+/// stroke styles, and composition groups fail closed until their M9A realization lands.
 pub(crate) const fn validate_literal_rect_item(
     item_index: usize,
     item: &PaintSceneItem,
 ) -> Result<Option<SupportedLiteralRect>, SceneValidationError> {
+    if let Err(error) = validate_item_composition(item_index, item) {
+        return Err(error);
+    }
     match item.primitive() {
         PaintPrimitive::Fill { shape, brush } => {
             let SceneShape::Rect(rect) = shape else {
@@ -264,5 +285,81 @@ const fn unsupported(
     SceneValidationError::UnsupportedItem {
         item_index,
         semantic,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use runenui_core::{
+        Brush, Color, Element, IntoEffects, LogicalLength, LogicalRect, NoHostProtocol,
+        PaintContribution, PaintContributionContext, PaintContributionItem, SceneOpacity, SceneShape,
+        StyleEnvironment, UiApp, View, Widget, WidgetMeasure, WidgetMeasureInput,
+    };
+    use runenui_runtime::{AppRuntime, LayoutConstraints, SurfaceBuildContext};
+
+    use super::{SceneValidationError, UnsupportedSceneSemantic, validate_scene_subset};
+
+    #[derive(Debug)]
+    struct LiteralPaint;
+
+    impl Widget<()> for LiteralPaint {
+        type State = ();
+
+        fn create_state(&self) -> Self::State {}
+
+        fn measure(&self, _: &Self::State, _: WidgetMeasureInput) -> WidgetMeasure {
+            WidgetMeasure::measured(LogicalLength::from(20_u16), LogicalLength::from(20_u16))
+        }
+
+        fn paint(&self, _: &Self::State, _: PaintContributionContext) -> PaintContribution {
+            let rect = LogicalRect::try_new(0.0, 0.0, 20.0, 20.0)
+                .unwrap_or_else(|_| unreachable!("controlled rectangle is valid"));
+            PaintContribution::single(PaintContributionItem::fill(
+                SceneShape::rect(rect),
+                Brush::solid(Color::WHITE),
+            ))
+        }
+    }
+
+    struct GroupedApp;
+
+    impl UiApp for GroupedApp {
+        type State = ();
+        type Action = ();
+        type HostProtocol = NoHostProtocol;
+
+        fn root(_: &Self::State) -> impl View<Self::Action> {
+            Element::new(LiteralPaint).opacity(
+                SceneOpacity::new(0.5)
+                    .unwrap_or_else(|_| unreachable!("controlled opacity is valid")),
+            )
+        }
+
+        fn update(
+            _: &mut Self::State,
+            _: Self::Action,
+        ) -> impl IntoEffects<Self::Action, Self::HostProtocol> {
+        }
+    }
+
+    #[test]
+    fn grouped_runtime_publication_fails_closed_before_wgpu_subset_realization() {
+        let mut runtime = AppRuntime::<GroupedApp>::mount(());
+        let environment = StyleEnvironment::default();
+        let publication = runtime
+            .publish_surface(&SurfaceBuildContext::new(
+                &environment,
+                LayoutConstraints::unbounded(),
+            ))
+            .unwrap_or_else(|_| unreachable!("controlled publication is admitted"));
+        assert_eq!(publication.paint_scene().groups().len(), 1);
+
+        assert_eq!(
+            validate_scene_subset(publication.paint_publication()),
+            Err(SceneValidationError::UnsupportedItem {
+                item_index: 0,
+                semantic: UnsupportedSceneSemantic::CompositionGroup,
+            })
+        );
     }
 }

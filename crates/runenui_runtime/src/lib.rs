@@ -31,6 +31,13 @@
 //! };
 //! ```
 //!
+//! Snapshot-local paint group references are runtime-issued and cannot be forged:
+//!
+//! ```compile_fail
+//! use runenui_runtime::PaintSceneGroupId;
+//! let _ = PaintSceneGroupId(0);
+//! ```
+//!
 //! Displayed-surface ingress remains logical and host-neutral:
 //!
 //! ```compile_fail
@@ -264,7 +271,7 @@ pub use runtime::{
 };
 pub use scene::{
     HitTestRegion, HitTestScene, PaintDamage, PaintPublication, PaintRevision, PaintScene,
-    PaintSceneItem, SceneClip,
+    PaintSceneEntry, PaintSceneGroup, PaintSceneGroupId, PaintSceneItem, SceneClip,
 };
 pub use scene_requirements::{SceneCapabilities, SceneRequirements, UnsupportedSceneRequirement};
 pub use semantic_action::{SubmitSemanticActionError, SubmitSemanticActionErrorKind};

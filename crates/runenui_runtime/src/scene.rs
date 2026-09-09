@@ -11,6 +11,11 @@ use runenui_text::{ShapedTextLease, ShapedTextResource};
 
 use crate::surface::RasterScale;
 
+mod group;
+
+pub(crate) use group::PaintSceneComposition;
+pub use group::{PaintSceneEntry, PaintSceneGroup, PaintSceneGroupId};
+
 /// One self-contained conjunctive scene clip in surface-logical coordinates.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SceneClip {
@@ -51,7 +56,7 @@ impl SceneClip {
     }
 }
 
-/// One self-contained renderer-neutral paint item in stable scene order.
+/// One self-contained renderer-neutral paint item in stable pre-group scene order.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PaintSceneItem {
     primitive: PaintPrimitive,
@@ -59,6 +64,7 @@ pub struct PaintSceneItem {
     clips: Vec<SceneClip>,
     opacity: SceneOpacity,
     layer: SceneLayer,
+    group: Option<PaintSceneGroupId>,
 }
 
 impl PaintSceneItem {
@@ -75,6 +81,7 @@ impl PaintSceneItem {
             clips,
             opacity,
             layer,
+            group: None,
         }
     }
 
@@ -107,17 +114,32 @@ impl PaintSceneItem {
     pub const fn layer(&self) -> SceneLayer {
         self.layer
     }
+
+    /// Returns the item's immediate snapshot-local composition group, if any.
+    #[must_use]
+    pub const fn group(&self) -> Option<PaintSceneGroupId> {
+        self.group
+    }
+
+    pub(crate) const fn set_group(&mut self, group: Option<PaintSceneGroupId>) {
+        self.group = group;
+    }
 }
 
 /// Immutable canonical renderer scene content.
 ///
+/// `items()` remains the exact inherited M6 pre-group sequence. `root_entries()`
+/// and `groups()` are the runtime-owned atomic composition structure derived from
+/// that sequence; renderers consume the published order and never choose another
+/// group insertion key.
+///
 /// Strong shaped-text leases are retained privately only to keep every runtime-backed
 /// `ResourceRef` in this exact scene bound to its immutable logical payload for
-/// retained-publication renderer retry. They are not separate paint authority:
-/// visible scene identity remains the ordered paint items.
+/// retained-publication renderer retry. They are not separate paint authority.
 #[derive(Clone, Default)]
 pub struct PaintScene {
     items: Arc<Vec<PaintSceneItem>>,
+    composition: Arc<PaintSceneComposition>,
     shaped_text_leases: Arc<HashMap<ResourceRef, ShapedTextLease>>,
 }
 
@@ -126,6 +148,8 @@ impl fmt::Debug for PaintScene {
         formatter
             .debug_struct("PaintScene")
             .field("items", &self.items)
+            .field("root_entries", &self.composition.root_entries())
+            .field("groups", &self.composition.groups())
             .field("shaped_text_resource_count", &self.shaped_text_leases.len())
             .finish()
     }
@@ -133,14 +157,15 @@ impl fmt::Debug for PaintScene {
 
 impl PartialEq for PaintScene {
     fn eq(&self, other: &Self) -> bool {
-        self.items == other.items
+        self.items == other.items && self.composition == other.composition
     }
 }
 
 impl PaintScene {
-    pub(crate) fn with_shaped_text_leases(
+    pub(crate) fn with_composition(
         items: Vec<PaintSceneItem>,
         shaped_text_leases: Vec<ShapedTextLease>,
+        composition: PaintSceneComposition,
     ) -> Self {
         let shaped_text_leases = shaped_text_leases
             .into_iter()
@@ -151,14 +176,35 @@ impl PaintScene {
             .collect();
         Self {
             items: Arc::new(items),
+            composition: Arc::new(composition),
             shaped_text_leases: Arc::new(shaped_text_leases),
         }
     }
 
-    /// Returns paint items in exact deterministic scene order.
+    /// Returns paint items in exact inherited M6 pre-group order.
     #[must_use]
     pub fn items(&self) -> &[PaintSceneItem] {
         self.items.as_slice()
+    }
+
+    /// Returns direct entries under the implicit scene root in exact contracted order.
+    #[must_use]
+    pub fn root_entries(&self) -> &[PaintSceneEntry] {
+        self.composition.root_entries()
+    }
+
+    /// Returns the immutable snapshot-local group table.
+    ///
+    /// Table order is storage only. Composition order is carried by root/group entries.
+    #[must_use]
+    pub fn groups(&self) -> &[PaintSceneGroup] {
+        self.composition.groups()
+    }
+
+    /// Resolves one snapshot-local group reference within this exact scene.
+    #[must_use]
+    pub fn group(&self, id: PaintSceneGroupId) -> Option<&PaintSceneGroup> {
+        self.composition.group(id)
     }
 
     /// Returns whether the scene contains no paint items.
@@ -183,6 +229,7 @@ impl PaintScene {
     #[cfg(test)]
     pub(crate) fn shares_storage_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.items, &other.items)
+            && Arc::ptr_eq(&self.composition, &other.composition)
             && Arc::ptr_eq(&self.shaped_text_leases, &other.shaped_text_leases)
     }
 }

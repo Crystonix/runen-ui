@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+mod groups;
 mod image_mapping;
 
 use crate::MountedNodeId;
@@ -453,11 +454,10 @@ pub(super) fn resolve_paint(
     ordered.sort_by_key(|(layer, mounted_preorder, contribution_local_order, _)| {
         (*layer, *mounted_preorder, *contribution_local_order)
     });
+    let (items, composition) =
+        groups::derive_static_node_effect_groups(topology, styles, ordered);
     ResolvedPaint {
-        scene: PaintScene::with_shaped_text_leases(
-            ordered.into_iter().map(|(_, _, _, item)| item).collect(),
-            shaped_text_leases,
-        ),
+        scene: PaintScene::with_composition(items, shaped_text_leases, composition),
         diagnostics,
     }
 }
