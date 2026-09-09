@@ -521,7 +521,7 @@ pub(super) fn resolve_paint(
                             )
                         });
                     shaped_text_leases.push(lease);
-                    let item = text_run_item(run, style);
+                    let item = text_run_item(run, &styles.resolutions[mounted_preorder]);
                     append_runtime_paint_item(
                         item,
                         mounted_preorder,
