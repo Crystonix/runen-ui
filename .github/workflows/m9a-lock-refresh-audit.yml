@@ -145,8 +145,8 @@ jobs:
       - name: Run focused item-bound proofs
         run: |
           cargo +1.93.0 test -p runenui_text
-          cargo +1.93.0 test -p runenui_runtime paint_bounds
-          cargo +1.93.0 test -p runenui_runtime --test m9_presentation_geometry
+          cargo +1.93.0 test -p runenui_runtime --lib --all-features paint_bounds
+          cargo +1.93.0 test -p runenui_runtime --test m9_presentation_geometry --all-features
       - name: Run canonical repository validation
         run: cargo +1.93.0 validate
       - name: Check candidate hygiene
