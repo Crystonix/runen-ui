@@ -3,9 +3,9 @@
 use runenui_core::{
     Brush, Color, Element, FontFamilyName, GenericFontFamily, LayoutDimension, LayoutStyle,
     LogicalLength, LogicalRect, NoHostProtocol, Outline, PaintContribution,
-    PaintContributionContext, PaintContributionGroup, PaintContributionItem, PaintPrimitive, Radius,
-    SceneLayer, SceneOpacity, SceneShape, StrokeStyle, StyleEnvironment, UiApp, View, Widget,
-    WidgetMeasure, WidgetMeasureInput, column,
+    PaintContributionContext, PaintContributionGroup, PaintContributionItem, PaintPrimitive,
+    Radius, SceneLayer, SceneOpacity, SceneShape, StrokeStyle, StyleEnvironment, UiApp, View,
+    Widget, WidgetMeasure, WidgetMeasureInput, column,
 };
 use runenui_runtime::{
     AppRuntime, LayoutConstraints, PaintSceneGroupId, PaintSceneItem, SurfaceBuildContext,
@@ -130,7 +130,13 @@ fn builtin_background_has_one_runtime_publication_authority() {
     assert_eq!(scene.items().len(), 1);
     let item = &scene.items()[0];
     assert_eq!(solid_fill_color(item), Some(BACKGROUND));
-    assert!(matches!(item.primitive(), PaintPrimitive::Fill { shape: SceneShape::Rect(_), .. }));
+    assert!(matches!(
+        item.primitive(),
+        PaintPrimitive::Fill {
+            shape: SceneShape::Rect(_),
+            ..
+        }
+    ));
     assert_eq!(item.layer(), SceneLayer::ZERO);
     assert_eq!(item.opacity(), SceneOpacity::OPAQUE);
     assert!(item.clips().is_empty());
@@ -152,11 +158,7 @@ impl Widget<()> for LayeredTextPaint {
     }
 
     fn paint(&self, (): &Self::State, _: PaintContributionContext) -> PaintContribution {
-        PaintContribution::new(vec![
-            fill(NEGATIVE, -1),
-            fill(ZERO, 0),
-            fill(POSITIVE, 1),
-        ])
+        PaintContribution::new(vec![fill(NEGATIVE, -1), fill(ZERO, 0), fill(POSITIVE, 1)])
     }
 }
 
@@ -236,10 +238,11 @@ fn rounded_decoration_preserves_m6_layer_and_local_text_order() {
     assert_eq!(rect.height(), expected_bounds.height());
 
     let PaintPrimitive::Stroke {
-        shape: SceneShape::RoundedRect {
-            rect: outline_rect,
-            radius: outline_radius,
-        },
+        shape:
+            SceneShape::RoundedRect {
+                rect: outline_rect,
+                radius: outline_radius,
+            },
         style,
         ..
     } = outline_item.primitive()
@@ -249,7 +252,10 @@ fn rounded_decoration_preserves_m6_layer_and_local_text_order() {
     assert_eq!(outline_rect, rect);
     assert_eq!(outline_radius, radius);
     assert_eq!(*style, StrokeStyle::new(LogicalLength::from(2_u16)));
-    assert_eq!(background_item.local_to_surface(), outline_item.local_to_surface());
+    assert_eq!(
+        background_item.local_to_surface(),
+        outline_item.local_to_surface()
+    );
     assert_eq!(background_item.layer(), SceneLayer::ZERO);
     assert_eq!(outline_item.layer(), SceneLayer::ZERO);
     assert_eq!(background_item.opacity(), SceneOpacity::OPAQUE);
@@ -339,6 +345,16 @@ fn runtime_decoration_stays_outside_explicit_group_but_inside_node_effect_group(
     assert_eq!(scene.items()[grouped].group(), Some(explicit_group_id));
     assert_eq!(scene.items()[background].group(), Some(node_group_id));
     assert_eq!(scene.items()[outline].group(), Some(node_group_id));
-    assert!(node_group.entries().iter().any(|entry| entry.item_index() == Some(background)));
-    assert!(node_group.entries().iter().any(|entry| entry.item_index() == Some(outline)));
+    assert!(
+        node_group
+            .entries()
+            .iter()
+            .any(|entry| entry.item_index() == Some(background))
+    );
+    assert!(
+        node_group
+            .entries()
+            .iter()
+            .any(|entry| entry.item_index() == Some(outline))
+    );
 }

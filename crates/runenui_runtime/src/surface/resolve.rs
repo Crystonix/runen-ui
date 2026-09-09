@@ -486,8 +486,7 @@ pub(super) fn resolve_paint(
             .then(|| node_decoration_shape(layout.bounds[mounted_preorder], style));
         let mut next_local_order = 0;
 
-        if let (Some(shape), Some(background)) =
-            (decoration_shape.as_ref(), computed.background())
+        if let (Some(shape), Some(background)) = (decoration_shape.as_ref(), computed.background())
         {
             append_runtime_paint_item(
                 PaintContributionItem::fill(shape.clone(), background.clone()),
@@ -537,7 +536,11 @@ pub(super) fn resolve_paint(
 
         if let (Some(shape), Some(outline)) = (decoration_shape.as_ref(), computed.outline()) {
             append_runtime_paint_item(
-                PaintContributionItem::stroke(shape.clone(), outline.brush().clone(), outline.style()),
+                PaintContributionItem::stroke(
+                    shape.clone(),
+                    outline.brush().clone(),
+                    outline.style(),
+                ),
                 mounted_preorder,
                 next_local_order,
                 owner_to_surface,
