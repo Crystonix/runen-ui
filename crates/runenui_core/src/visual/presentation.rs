@@ -226,10 +226,8 @@ impl PresentationTransform {
         let m12 = sin * self.scale.x();
         let m21 = -sin * self.scale.y();
         let m22 = cos * self.scale.y();
-        let tx = origin_x + self.translation.x()
-            - m11.mul_add(origin_x, m21 * origin_y);
-        let ty = origin_y + self.translation.y()
-            - m12.mul_add(origin_x, m22 * origin_y);
+        let tx = origin_x + self.translation.x() - m11.mul_add(origin_x, m21 * origin_y);
+        let ty = origin_y + self.translation.y() - m12.mul_add(origin_x, m22 * origin_y);
         LogicalTransform::try_new(m11, m12, m21, m22, tx, ty)
     }
 }
