@@ -11,8 +11,8 @@ use crate::style_debug::{SurfaceStyleNode, SurfaceStyleReport};
 use runenui_core::{
     __runtime::transform_rect_aabb, Color, ContributionClip, ElementId, HitContributionContext,
     LayoutStyle, LogicalPoint, LogicalRect, LogicalTransform, PaintContribution,
-    PaintContributionContext, PaintContributionItem, StyleEffects, StyleEnvironment,
-    StyleInteractionState, StyleResolution, WidgetDiagnostic, WidgetTypeId,
+    PaintContributionContext, PaintContributionItem, Radius, SceneShape, StyleEffects,
+    StyleEnvironment, StyleInteractionState, StyleResolution, WidgetDiagnostic, WidgetTypeId,
     resolve_style_in_environment, style_effects_between,
 };
 use runenui_text::TextSystem;
@@ -364,9 +364,41 @@ fn text_run_item(run: &runenui_text::TextRun, style: &StyleResolution) -> PaintC
     .unwrap_or_else(|_| unreachable!("logical text artifacts issue shaped-text resource refs"))
 }
 
+fn node_decoration_shape(bounds: LogicalRect, style: &StyleResolution) -> SceneShape {
+    let rect = LogicalRect::try_new(0.0, 0.0, bounds.width(), bounds.height())
+        .unwrap_or_else(|_| unreachable!("published layout size is valid"));
+    match style.computed_style().radius() {
+        Some(radius) if radius != Radius::ZERO => SceneShape::rounded_rect(rect, radius),
+        Some(_) | None => SceneShape::rect(rect),
+    }
+}
+
+fn append_runtime_paint_item(
+    item: PaintContributionItem,
+    mounted_preorder: usize,
+    contribution_local_order: usize,
+    owner_to_surface: LogicalTransform,
+    ordered: &mut Vec<groups::OrderedPaintItem>,
+) {
+    ordered.push(groups::OrderedPaintItem::new(
+        item.layer(),
+        mounted_preorder,
+        contribution_local_order,
+        None,
+        PaintSceneItem::new(
+            item.primitive().clone(),
+            owner_to_surface,
+            Vec::new(),
+            item.opacity(),
+            item.layer(),
+        ),
+    ));
+}
+
 fn append_paint_contribution(
     contribution: &PaintContribution,
     mounted_preorder: usize,
+    local_order_base: usize,
     owner_to_surface: LogicalTransform,
     diagnostics: &mut Vec<WidgetDiagnostic>,
     explicit_groups: &mut Vec<groups::ResolvedExplicitGroup>,
@@ -418,7 +450,7 @@ fn append_paint_contribution(
         ordered.push(groups::OrderedPaintItem::new(
             item.layer(),
             mounted_preorder,
-            contribution_local_order,
+            local_order_base + contribution_local_order,
             explicit_group,
             PaintSceneItem::new(
                 image_mapping::publication_primitive(item),
@@ -448,19 +480,36 @@ pub(super) fn resolve_paint(
     let mut shaped_text_leases = Vec::new();
     for (mounted_preorder, node) in topology.nodes.iter().enumerate() {
         let owner_to_surface = presentation.node(mounted_preorder).owner_to_surface();
-        let mut next_local_order =
-            capabilities
-                .paint_at(mounted_preorder, &node.id)
-                .map_or(0, |contribution| {
-                    append_paint_contribution(
-                        &contribution,
-                        mounted_preorder,
-                        owner_to_surface,
-                        &mut diagnostics[mounted_preorder],
-                        &mut explicit_groups,
-                        &mut ordered,
-                    )
-                });
+        let style = &styles.resolutions[mounted_preorder];
+        let computed = style.computed_style();
+        let decoration_shape = (computed.background().is_some() || computed.outline().is_some())
+            .then(|| node_decoration_shape(layout.bounds[mounted_preorder], style));
+        let mut next_local_order = 0;
+
+        if let (Some(shape), Some(background)) =
+            (decoration_shape.as_ref(), computed.background())
+        {
+            append_runtime_paint_item(
+                PaintContributionItem::fill(shape.clone(), background.clone()),
+                mounted_preorder,
+                next_local_order,
+                owner_to_surface,
+                &mut ordered,
+            );
+            next_local_order += 1;
+        }
+
+        if let Some(contribution) = capabilities.paint_at(mounted_preorder, &node.id) {
+            next_local_order += append_paint_contribution(
+                &contribution,
+                mounted_preorder,
+                next_local_order,
+                owner_to_surface,
+                &mut diagnostics[mounted_preorder],
+                &mut explicit_groups,
+                &mut ordered,
+            );
+        }
 
         if let Some(artifact) = layout.text_layouts[mounted_preorder].artifact() {
             for line in artifact.lines() {
@@ -473,23 +522,27 @@ pub(super) fn resolve_paint(
                             )
                         });
                     shaped_text_leases.push(lease);
-                    let item = text_run_item(run, &styles.resolutions[mounted_preorder]);
-                    ordered.push(groups::OrderedPaintItem::new(
-                        item.layer(),
+                    let item = text_run_item(run, style);
+                    append_runtime_paint_item(
+                        item,
                         mounted_preorder,
                         next_local_order,
-                        None,
-                        PaintSceneItem::new(
-                            item.primitive().clone(),
-                            owner_to_surface,
-                            Vec::new(),
-                            item.opacity(),
-                            item.layer(),
-                        ),
-                    ));
+                        owner_to_surface,
+                        &mut ordered,
+                    );
                     next_local_order += 1;
                 }
             }
+        }
+
+        if let (Some(shape), Some(outline)) = (decoration_shape.as_ref(), computed.outline()) {
+            append_runtime_paint_item(
+                PaintContributionItem::stroke(shape.clone(), outline.brush().clone(), outline.style()),
+                mounted_preorder,
+                next_local_order,
+                owner_to_surface,
+                &mut ordered,
+            );
         }
     }
     ordered.sort_by_key(groups::OrderedPaintItem::ordering_key);
