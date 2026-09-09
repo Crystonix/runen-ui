@@ -13,7 +13,7 @@ use crate::surface::RasterScale;
 
 mod group;
 
-pub(crate) use group::PaintSceneComposition;
+pub use group::PaintSceneComposition;
 pub use group::{PaintSceneEntry, PaintSceneGroup, PaintSceneGroupId};
 
 /// One self-contained conjunctive scene clip in surface-logical coordinates.
