@@ -159,47 +159,47 @@ impl From<OpacityToken> for OpacityValue {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct VisualStyleProperties {
+pub(super) struct VisualStyleProperties {
     outline: Option<OutlineValue>,
     shadows: Option<ShadowValue>,
     opacity: Option<OpacityValue>,
 }
 
 impl VisualStyleProperties {
-    pub(crate) const EMPTY: Self = Self {
+    pub(super) const EMPTY: Self = Self {
         outline: None,
         shadows: None,
         opacity: None,
     };
 
-    pub(crate) const fn is_empty(&self) -> bool {
+    pub(super) const fn is_empty(&self) -> bool {
         self.outline.is_none() && self.shadows.is_none() && self.opacity.is_none()
     }
 
-    pub(crate) fn with_outline(mut self, value: impl Into<OutlineValue>) -> Self {
+    pub(super) fn with_outline(mut self, value: impl Into<OutlineValue>) -> Self {
         self.outline = Some(value.into());
         self
     }
 
-    pub(crate) fn with_shadows(mut self, value: impl Into<ShadowValue>) -> Self {
+    pub(super) fn with_shadows(mut self, value: impl Into<ShadowValue>) -> Self {
         self.shadows = Some(value.into());
         self
     }
 
-    pub(crate) fn with_opacity(mut self, value: impl Into<OpacityValue>) -> Self {
+    pub(super) fn with_opacity(mut self, value: impl Into<OpacityValue>) -> Self {
         self.opacity = Some(value.into());
         self
     }
 
-    pub(crate) const fn outline(&self) -> Option<&OutlineValue> {
+    pub(super) const fn outline(&self) -> Option<&OutlineValue> {
         self.outline.as_ref()
     }
 
-    pub(crate) const fn shadows(&self) -> Option<&ShadowValue> {
+    pub(super) const fn shadows(&self) -> Option<&ShadowValue> {
         self.shadows.as_ref()
     }
 
-    pub(crate) const fn opacity(&self) -> Option<&OpacityValue> {
+    pub(super) const fn opacity(&self) -> Option<&OpacityValue> {
         self.opacity.as_ref()
     }
 }
