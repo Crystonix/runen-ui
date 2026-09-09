@@ -188,14 +188,8 @@ pub(super) fn derive_static_node_effect_groups(
             )
         })
         .collect();
-    let root_entries = root_entries
-        .into_iter()
-        .map(|(_, entry)| entry)
-        .collect();
-    (
-        items,
-        PaintSceneComposition::new(groups, root_entries),
-    )
+    let root_entries = root_entries.into_iter().map(|(_, entry)| entry).collect();
+    (items, PaintSceneComposition::new(groups, root_entries))
 }
 
 #[cfg(test)]
