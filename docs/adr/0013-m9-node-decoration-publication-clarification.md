@@ -2,7 +2,7 @@
 
 > **Category:** ADR
 >
-> **Status:** Proposed bounded M9 correction; accepted only after exact-head owner acceptance, squash merge, and accepted-main validation
+> **Status:** Accepted target amendment on exact-head owner acceptance
 >
 > **Decision date:** 2026-09-09
 >
