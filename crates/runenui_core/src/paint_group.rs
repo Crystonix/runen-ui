@@ -233,11 +233,10 @@ mod tests {
 
     #[test]
     fn nested_non_empty_groups_receive_private_preorder_ordinals() {
-        let opacity =
-            SceneOpacity::new(0.5).unwrap_or_else(|_| unreachable!("opacity is valid"));
+        let opacity = SceneOpacity::new(0.5).unwrap_or_else(|_| unreachable!("opacity is valid"));
         let nested = PaintContributionGroup::new(vec![item(2).into()]);
-        let outer = PaintContributionGroup::new(vec![item(1).into(), nested.into()])
-            .with_opacity(opacity);
+        let outer =
+            PaintContributionGroup::new(vec![item(1).into(), nested.into()]).with_opacity(opacity);
         let normalized = normalize_entries(vec![outer.into(), item(3).into()]);
 
         assert_eq!(normalized.items, vec![item(1), item(2), item(3)]);
@@ -250,9 +249,8 @@ mod tests {
 
     #[test]
     fn structurally_empty_groups_are_omitted_but_identity_non_empty_groups_remain() {
-        let empty = PaintContributionGroup::new(vec![
-            PaintContributionGroup::new(Vec::new()).into(),
-        ]);
+        let empty =
+            PaintContributionGroup::new(vec![PaintContributionGroup::new(Vec::new()).into()]);
         let identity = PaintContributionGroup::new(vec![item(7).into()]);
         let normalized = normalize_entries(vec![empty.into(), identity.into()]);
 
