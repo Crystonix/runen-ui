@@ -28,11 +28,11 @@ impl Widget<()> for LayeredPaint {
 
     fn create_state(&self) -> Self::State {}
 
-    fn measure(&self, _: &Self::State, _: WidgetMeasureInput) -> WidgetMeasure {
+    fn measure(&self, (): &Self::State, _: WidgetMeasureInput) -> WidgetMeasure {
         WidgetMeasure::measured(LogicalLength::from(20_u16), LogicalLength::from(20_u16))
     }
 
-    fn paint(&self, _: &Self::State, _: PaintContributionContext) -> PaintContribution {
+    fn paint(&self, (): &Self::State, _: PaintContributionContext) -> PaintContribution {
         PaintContribution::new(
             self.entries
                 .iter()
@@ -52,7 +52,7 @@ impl UiApp for GroupedApp {
     type Action = ();
     type HostProtocol = NoHostProtocol;
 
-    fn root(_: &Self::State) -> impl View<Self::Action> {
+    fn root((): &Self::State) -> impl View<Self::Action> {
         let opacity =
             SceneOpacity::new(0.5).unwrap_or_else(|_| unreachable!("controlled opacity is valid"));
         let transparent_shadow =
@@ -76,8 +76,8 @@ impl UiApp for GroupedApp {
     }
 
     fn update(
-        _: &mut Self::State,
-        _: Self::Action,
+        (): &mut Self::State,
+        (): Self::Action,
     ) -> impl IntoEffects<Self::Action, Self::HostProtocol> {
     }
 }
@@ -89,7 +89,7 @@ impl UiApp for UngroupedApp {
     type Action = ();
     type HostProtocol = NoHostProtocol;
 
-    fn root(_: &Self::State) -> impl View<Self::Action> {
+    fn root((): &Self::State) -> impl View<Self::Action> {
         column(vec![
             Element::new(LayeredPaint {
                 entries: &[(-1, 10), (1, 12)],
@@ -101,8 +101,8 @@ impl UiApp for UngroupedApp {
     }
 
     fn update(
-        _: &mut Self::State,
-        _: Self::Action,
+        (): &mut Self::State,
+        (): Self::Action,
     ) -> impl IntoEffects<Self::Action, Self::HostProtocol> {
     }
 }
@@ -114,7 +114,7 @@ impl UiApp for SiblingGroupsApp {
     type Action = ();
     type HostProtocol = NoHostProtocol;
 
-    fn root(_: &Self::State) -> impl View<Self::Action> {
+    fn root((): &Self::State) -> impl View<Self::Action> {
         let opacity_a =
             SceneOpacity::new(0.5).unwrap_or_else(|_| unreachable!("controlled opacity is valid"));
         let opacity_b =
@@ -136,8 +136,8 @@ impl UiApp for SiblingGroupsApp {
     }
 
     fn update(
-        _: &mut Self::State,
-        _: Self::Action,
+        (): &mut Self::State,
+        (): Self::Action,
     ) -> impl IntoEffects<Self::Action, Self::HostProtocol> {
     }
 }
@@ -149,15 +149,15 @@ impl UiApp for EmptyGroupApp {
     type Action = ();
     type HostProtocol = NoHostProtocol;
 
-    fn root(_: &Self::State) -> impl View<Self::Action> {
+    fn root((): &Self::State) -> impl View<Self::Action> {
         column(Vec::<Element<()>>::new()).opacity(
             SceneOpacity::new(0.5).unwrap_or_else(|_| unreachable!("controlled opacity is valid")),
         )
     }
 
     fn update(
-        _: &mut Self::State,
-        _: Self::Action,
+        (): &mut Self::State,
+        (): Self::Action,
     ) -> impl IntoEffects<Self::Action, Self::HostProtocol> {
     }
 }

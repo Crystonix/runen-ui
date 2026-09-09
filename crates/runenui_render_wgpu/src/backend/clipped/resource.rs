@@ -1633,11 +1633,11 @@ mod tests {
 
         fn create_state(&self) -> Self::State {}
 
-        fn measure(&self, _: &Self::State, _: WidgetMeasureInput) -> WidgetMeasure {
+        fn measure(&self, (): &Self::State, _: WidgetMeasureInput) -> WidgetMeasure {
             WidgetMeasure::measured(LogicalLength::from(20_u16), LogicalLength::from(20_u16))
         }
 
-        fn paint(&self, _: &Self::State, _: PaintContributionContext) -> PaintContribution {
+        fn paint(&self, (): &Self::State, _: PaintContributionContext) -> PaintContribution {
             let resource = ResourceRef::new(ResourceKind::Image);
             let image = ImageDescriptor::new(
                 resource,
@@ -1660,7 +1660,7 @@ mod tests {
         type Action = ();
         type HostProtocol = NoHostProtocol;
 
-        fn root(_: &Self::State) -> impl View<Self::Action> {
+        fn root((): &Self::State) -> impl View<Self::Action> {
             Element::new(ImagePaint).opacity(
                 SceneOpacity::new(0.5)
                     .unwrap_or_else(|_| unreachable!("controlled opacity is valid")),
@@ -1668,8 +1668,8 @@ mod tests {
         }
 
         fn update(
-            _: &mut Self::State,
-            _: Self::Action,
+            (): &mut Self::State,
+            (): Self::Action,
         ) -> impl IntoEffects<Self::Action, Self::HostProtocol> {
         }
     }
