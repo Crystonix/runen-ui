@@ -381,7 +381,8 @@ mod tests {
         }
     }
 
-    fn publish<App: UiApp<State = (), Action = (), HostProtocol = NoHostProtocol>>() -> runenui_runtime::SurfacePublication {
+    fn publish<App: UiApp<State = (), Action = (), HostProtocol = NoHostProtocol>>()
+    -> runenui_runtime::SurfacePublication {
         let mut runtime = AppRuntime::<App>::mount(());
         let environment = StyleEnvironment::default();
         runtime
@@ -410,7 +411,10 @@ mod tests {
     fn explicit_owner_local_group_fails_closed_before_wgpu_subset_realization() {
         let publication = publish::<ExplicitGroupedApp>();
         assert_eq!(publication.paint_scene().groups().len(), 1);
-        assert_eq!(publication.paint_scene().groups()[0].opacity(), SceneOpacity::OPAQUE);
+        assert_eq!(
+            publication.paint_scene().groups()[0].opacity(),
+            SceneOpacity::OPAQUE
+        );
 
         assert_eq!(
             validate_scene_subset(publication.paint_publication()),
