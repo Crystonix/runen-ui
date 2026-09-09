@@ -365,9 +365,10 @@ pub use subscription::{
     SendSubscriptionSource, SendSubscriptionStartOutcome, SubscriptionSet,
 };
 pub use typography::{
-    FontFamily, FontFamilyName, FontFamilyNameError, FontStyle, FontVariation, FontVariationError,
-    FontWeight, FontWeightError, FontWidth, FontWidthError, GenericFontFamily, OpenTypeTag,
-    OpenTypeTagError, Typography,
+    FontFamily, FontFamilyName, FontFamilyNameError, FontFeature, FontObliqueAngle,
+    FontObliqueAngleError, FontStyle, FontVariation, FontVariationError, FontWeight,
+    FontWeightError, FontWidth, FontWidthError, GenericFontFamily, OpenTypeTag, OpenTypeTagError,
+    Typography,
 };
 pub use value::{LogicalLength, LogicalLengthError};
 pub use visual::{
