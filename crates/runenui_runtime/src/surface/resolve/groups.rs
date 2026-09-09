@@ -1,20 +1,101 @@
 use std::collections::HashMap;
 
-use runenui_core::{SceneLayer, SceneOpacity};
+use runenui_core::{DropShadow, SceneLayer, SceneOpacity};
 
 use crate::scene::{
     PaintSceneComposition, PaintSceneEntry, PaintSceneGroup, PaintSceneGroupId, PaintSceneItem,
+    SceneClip,
 };
 
 use super::{CachedStyleFacts, SurfaceTopologySnapshot};
 
-pub(super) type OrderedPaintItem = (SceneLayer, usize, usize, PaintSceneItem);
+/// Runtime-private staging reference to one resolved explicit owner-local group.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct ExplicitGroupId(usize);
 
-struct StaticGroupPlan {
-    group_nodes: Vec<usize>,
-    group_anchors: Vec<usize>,
-    group_parents: Vec<Option<PaintSceneGroupId>>,
-    item_groups: Vec<Option<PaintSceneGroupId>>,
+impl ExplicitGroupId {
+    pub(super) const fn new(index: usize) -> Self {
+        Self(index)
+    }
+
+    const fn index(self) -> usize {
+        self.0
+    }
+}
+
+/// Surface-space neutral facts for one valid explicit owner-local group.
+pub(super) struct ResolvedExplicitGroup {
+    owner: usize,
+    parent: Option<ExplicitGroupId>,
+    clips: Vec<SceneClip>,
+    opacity: SceneOpacity,
+    shadows: Vec<DropShadow>,
+}
+
+impl ResolvedExplicitGroup {
+    pub(super) const fn new(
+        owner: usize,
+        parent: Option<ExplicitGroupId>,
+        clips: Vec<SceneClip>,
+        opacity: SceneOpacity,
+        shadows: Vec<DropShadow>,
+    ) -> Self {
+        Self {
+            owner,
+            parent,
+            clips,
+            opacity,
+            shadows,
+        }
+    }
+}
+
+/// One admitted paint item with the exact facts needed before group contraction.
+pub(super) struct OrderedPaintItem {
+    layer: SceneLayer,
+    mounted_preorder: usize,
+    contribution_local_order: usize,
+    explicit_group: Option<ExplicitGroupId>,
+    item: PaintSceneItem,
+}
+
+impl OrderedPaintItem {
+    pub(super) const fn new(
+        layer: SceneLayer,
+        mounted_preorder: usize,
+        contribution_local_order: usize,
+        explicit_group: Option<ExplicitGroupId>,
+        item: PaintSceneItem,
+    ) -> Self {
+        Self {
+            layer,
+            mounted_preorder,
+            contribution_local_order,
+            explicit_group,
+            item,
+        }
+    }
+
+    pub(super) const fn ordering_key(&self) -> (SceneLayer, usize, usize) {
+        (
+            self.layer,
+            self.mounted_preorder,
+            self.contribution_local_order,
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
+enum GroupSource {
+    Node(usize),
+    Explicit(ExplicitGroupId),
+}
+
+struct GroupPlan {
+    sources: Vec<GroupSource>,
+    parents: Vec<Option<usize>>,
+    anchors: Vec<Option<usize>>,
+    item_groups: Vec<Option<usize>>,
 }
 
 fn topology_parents(topology: &SurfaceTopologySnapshot) -> Vec<Option<usize>> {
@@ -35,13 +116,13 @@ fn topology_parents(topology: &SurfaceTopologySnapshot) -> Vec<Option<usize>> {
         .collect()
 }
 
-const fn nearest_group(
+fn nearest_node_group(
     mut cursor: Option<usize>,
     parent: &[Option<usize>],
-    group_for_node: &[Option<PaintSceneGroupId>],
-) -> Option<PaintSceneGroupId> {
+    node_groups: &[Option<usize>],
+) -> Option<usize> {
     while let Some(node) = cursor {
-        if let Some(group) = group_for_node[node] {
+        if let Some(group) = node_groups[node] {
             return Some(group);
         }
         cursor = parent[node];
@@ -49,13 +130,15 @@ const fn nearest_group(
     None
 }
 
-fn derive_static_group_plan(
+fn derive_group_plan(
     topology: &SurfaceTopologySnapshot,
     styles: &CachedStyleFacts,
+    explicit_groups: &[ResolvedExplicitGroup],
     item_owners: &[usize],
-) -> StaticGroupPlan {
-    let parent = topology_parents(topology);
-    let requires_group = styles
+    item_explicit_groups: &[Option<ExplicitGroupId>],
+) -> GroupPlan {
+    let topology_parent = topology_parents(topology);
+    let requires_node_group = styles
         .resolutions
         .iter()
         .map(|resolution| {
@@ -64,106 +147,149 @@ fn derive_static_group_plan(
         })
         .collect::<Vec<_>>();
 
-    let mut candidate_anchor = vec![None; topology.nodes.len()];
-    for (item_index, owner) in item_owners.iter().copied().enumerate() {
-        let mut cursor = Some(owner);
-        while let Some(node) = cursor {
-            if requires_group[node] {
-                candidate_anchor[node] = Some(
-                    candidate_anchor[node]
-                        .map_or(item_index, |anchor: usize| anchor.min(item_index)),
-                );
-            }
-            cursor = parent[node];
+    let mut sources = Vec::new();
+    let mut node_groups = vec![None; topology.nodes.len()];
+    for (node, requires_group) in requires_node_group.into_iter().enumerate() {
+        if requires_group {
+            let candidate = sources.len();
+            node_groups[node] = Some(candidate);
+            sources.push(GroupSource::Node(node));
         }
     }
 
-    let mut group_for_node = vec![None; topology.nodes.len()];
-    let mut group_nodes = Vec::new();
-    let mut group_anchors = Vec::new();
-    for (node, anchor) in candidate_anchor.into_iter().enumerate() {
-        let Some(anchor) = anchor else {
-            continue;
-        };
-        let group = PaintSceneGroupId::new(group_nodes.len());
-        group_for_node[node] = Some(group);
-        group_nodes.push(node);
-        group_anchors.push(anchor);
+    let mut explicit_candidates = Vec::with_capacity(explicit_groups.len());
+    for explicit_index in 0..explicit_groups.len() {
+        let candidate = sources.len();
+        explicit_candidates.push(candidate);
+        sources.push(GroupSource::Explicit(ExplicitGroupId::new(explicit_index)));
     }
 
-    let group_parents = group_nodes
-        .iter()
-        .copied()
-        .map(|node| nearest_group(parent[node], &parent, &group_for_node))
-        .collect();
+    let mut parents = vec![None; sources.len()];
+    for (node, candidate) in node_groups.iter().copied().enumerate() {
+        let Some(candidate) = candidate else {
+            continue;
+        };
+        parents[candidate] =
+            nearest_node_group(topology_parent[node], &topology_parent, &node_groups);
+    }
+    for (explicit_index, explicit) in explicit_groups.iter().enumerate() {
+        let candidate = explicit_candidates[explicit_index];
+        parents[candidate] = explicit.parent.map_or_else(
+            || nearest_node_group(Some(explicit.owner), &topology_parent, &node_groups),
+            |parent| explicit_candidates[parent.index()],
+        );
+    }
+
     let item_groups = item_owners
         .iter()
         .copied()
-        .map(|owner| nearest_group(Some(owner), &parent, &group_for_node))
-        .collect();
+        .zip(item_explicit_groups.iter().copied())
+        .map(|(owner, explicit)| {
+            explicit.map_or_else(
+                || nearest_node_group(Some(owner), &topology_parent, &node_groups),
+                |explicit| explicit_candidates[explicit.index()],
+            )
+        })
+        .collect::<Vec<_>>();
 
-    StaticGroupPlan {
-        group_nodes,
-        group_anchors,
-        group_parents,
+    let mut anchors = vec![None; sources.len()];
+    for (item_index, immediate_group) in item_groups.iter().copied().enumerate() {
+        let mut cursor = immediate_group;
+        while let Some(group) = cursor {
+            anchors[group] = Some(
+                anchors[group].map_or(item_index, |anchor: usize| anchor.min(item_index)),
+            );
+            cursor = parents[group];
+        }
+    }
+
+    GroupPlan {
+        sources,
+        parents,
+        anchors,
         item_groups,
     }
 }
 
-/// Applies ADR 0012 static node-effect grouping to an already M6-ordered item list.
+/// Applies accepted ADR 0012 node and explicit owner-local grouping to one exact
+/// inherited M6 pre-group item sequence.
 ///
-/// The input order is canonical pre-group order. Returned `items` preserve it exactly;
-/// only the separate composition structure contracts isolated descendants.
-pub(super) fn derive_static_node_effect_groups(
+/// `items()` preserve that sequence exactly. Only the separate composition forest
+/// contracts non-empty groups at their first descendant; explicit local groups and
+/// runtime node-effect groups share one runtime-issued snapshot-local group table.
+pub(super) fn derive_composition_groups(
     topology: &SurfaceTopologySnapshot,
     styles: &CachedStyleFacts,
+    explicit_groups: &[ResolvedExplicitGroup],
     ordered: Vec<OrderedPaintItem>,
 ) -> (Vec<PaintSceneItem>, PaintSceneComposition) {
     debug_assert_eq!(topology.nodes.len(), styles.resolutions.len());
 
     let item_owners = ordered
         .iter()
-        .map(|(_, mounted_preorder, _, _)| *mounted_preorder)
+        .map(|item| item.mounted_preorder)
         .collect::<Vec<_>>();
-    let mut items = ordered
-        .into_iter()
-        .map(|(_, _, _, item)| item)
+    let item_explicit_groups = ordered
+        .iter()
+        .map(|item| item.explicit_group)
         .collect::<Vec<_>>();
+    let mut items = ordered.into_iter().map(|item| item.item).collect::<Vec<_>>();
     if items.is_empty() || topology.nodes.is_empty() {
         let item_count = items.len();
         return (items, PaintSceneComposition::ungrouped(item_count));
     }
 
-    let StaticGroupPlan {
-        group_nodes,
-        group_anchors,
-        group_parents,
+    let GroupPlan {
+        sources,
+        parents,
+        anchors,
         item_groups,
-    } = derive_static_group_plan(topology, styles, &item_owners);
-    if group_nodes.is_empty() {
+    } = derive_group_plan(
+        topology,
+        styles,
+        explicit_groups,
+        &item_owners,
+        &item_explicit_groups,
+    );
+
+    let mut candidate_to_scene = vec![None; sources.len()];
+    let mut group_count = 0;
+    for (candidate, anchor) in anchors.iter().enumerate() {
+        if anchor.is_some() {
+            candidate_to_scene[candidate] = Some(PaintSceneGroupId::new(group_count));
+            group_count += 1;
+        }
+    }
+    if group_count == 0 {
         let item_count = items.len();
         return (items, PaintSceneComposition::ungrouped(item_count));
     }
 
-    for (item, group) in items.iter_mut().zip(&item_groups) {
-        item.set_group(*group);
+    for (item, candidate) in items.iter_mut().zip(&item_groups) {
+        item.set_group(candidate.and_then(|candidate| candidate_to_scene[*candidate]));
     }
 
-    let mut grouped_entries = vec![Vec::<(usize, PaintSceneEntry)>::new(); group_nodes.len()];
+    let mut grouped_entries = vec![Vec::<(usize, PaintSceneEntry)>::new(); group_count];
     let mut root_entries = Vec::<(usize, PaintSceneEntry)>::new();
-    for (item_index, group) in item_groups.iter().copied().enumerate() {
+    for (item_index, candidate) in item_groups.iter().copied().enumerate() {
         let entry = (item_index, PaintSceneEntry::item(item_index));
-        if let Some(group) = group {
+        if let Some(group) = candidate.and_then(|candidate| candidate_to_scene[candidate]) {
             grouped_entries[group.index()].push(entry);
         } else {
             root_entries.push(entry);
         }
     }
-    for (group_index, parent_group) in group_parents.iter().copied().enumerate() {
-        let group = PaintSceneGroupId::new(group_index);
-        let entry = (group_anchors[group_index], PaintSceneEntry::group(group));
-        if let Some(parent_group) = parent_group {
-            grouped_entries[parent_group.index()].push(entry);
+
+    for candidate in 0..sources.len() {
+        let Some(group) = candidate_to_scene[candidate] else {
+            continue;
+        };
+        let anchor = anchors[candidate]
+            .unwrap_or_else(|| unreachable!("published group has a descendant anchor"));
+        let entry = (anchor, PaintSceneEntry::group(group));
+        let parent = parents[candidate].and_then(|parent| candidate_to_scene[parent]);
+        if let Some(parent) = parent {
+            grouped_entries[parent.index()].push(entry);
         } else {
             root_entries.push(entry);
         }
@@ -173,21 +299,41 @@ pub(super) fn derive_static_node_effect_groups(
     }
     root_entries.sort_by_key(|(anchor, _)| *anchor);
 
-    let groups = group_nodes
-        .into_iter()
-        .zip(grouped_entries)
-        .enumerate()
-        .map(|(group_index, (node, entries))| {
-            let computed = styles.resolutions[node].computed_style();
-            PaintSceneGroup::new(
-                group_parents[group_index],
-                entries.into_iter().map(|(_, entry)| entry).collect(),
-                Vec::new(),
-                computed.opacity(),
-                computed.shadows().to_vec(),
-            )
-        })
-        .collect();
+    let mut groups = Vec::with_capacity(group_count);
+    for (candidate, source) in sources.into_iter().enumerate() {
+        let Some(group) = candidate_to_scene[candidate] else {
+            continue;
+        };
+        let parent = parents[candidate].and_then(|parent| candidate_to_scene[parent]);
+        let entries = std::mem::take(&mut grouped_entries[group.index()])
+            .into_iter()
+            .map(|(_, entry)| entry)
+            .collect();
+        let published = match source {
+            GroupSource::Node(node) => {
+                let computed = styles.resolutions[node].computed_style();
+                PaintSceneGroup::new(
+                    parent,
+                    entries,
+                    Vec::new(),
+                    computed.opacity(),
+                    computed.shadows().to_vec(),
+                )
+            }
+            GroupSource::Explicit(explicit) => {
+                let explicit = &explicit_groups[explicit.index()];
+                PaintSceneGroup::new(
+                    parent,
+                    entries,
+                    explicit.clips.clone(),
+                    explicit.opacity,
+                    explicit.shadows.clone(),
+                )
+            }
+        };
+        groups.push(published);
+    }
+
     let root_entries = root_entries.into_iter().map(|(_, entry)| entry).collect();
     (items, PaintSceneComposition::new(groups, root_entries))
 }
