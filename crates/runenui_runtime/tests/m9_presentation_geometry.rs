@@ -1,7 +1,7 @@
 use runenui_core::{
-    Color, IntoEffects, LogicalPoint, NoHostProtocol, PresentationOrigin, PresentationRotation,
-    PresentationScale, PresentationTransform, PresentationTranslation, StyleEnvironment, UiApp,
-    UnitInterval, View, button,
+    Color, IntoEffects, LayoutDimension, LayoutStyle, LogicalLength, LogicalPoint, NoHostProtocol,
+    PresentationOrigin, PresentationRotation, PresentationScale, PresentationTransform,
+    PresentationTranslation, StyleEnvironment, UiApp, UnitInterval, View, button,
 };
 use runenui_runtime::{AppRuntime, LayoutConstraints, SurfaceBuildContext};
 
@@ -16,6 +16,11 @@ impl UiApp for PresentationGeometryApp {
         button("translated")
             .on_activate(|| ())
             .background(Color::WHITE)
+            .with_layout(
+                LayoutStyle::default()
+                    .with_width(LayoutDimension::length(LogicalLength::from(120_u16)))
+                    .with_height(LayoutDimension::length(LogicalLength::from(40_u16))),
+            )
             .presentation(translation())
             .key("root")
     }
@@ -43,7 +48,7 @@ fn approx_eq(left: f32, right: f32) {
 
 #[test]
 fn static_presentation_translation_correlates_paint_hit_and_semantic_geometry_without_layout_mutation()
- {
+{
     let mut runtime = AppRuntime::<PresentationGeometryApp>::mount(());
     let environment = StyleEnvironment::default();
     let publication = runtime
