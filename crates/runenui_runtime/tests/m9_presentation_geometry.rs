@@ -48,7 +48,7 @@ fn approx_eq(left: f32, right: f32) {
 
 #[test]
 fn static_presentation_translation_correlates_paint_hit_and_semantic_geometry_without_layout_mutation()
-{
+ {
     let mut runtime = AppRuntime::<PresentationGeometryApp>::mount(());
     let environment = StyleEnvironment::default();
     let publication = runtime
