@@ -292,12 +292,19 @@ const fn unsupported(
 mod tests {
     use runenui_core::{
         Brush, Color, Element, IntoEffects, LogicalLength, LogicalRect, NoHostProtocol,
-        PaintContribution, PaintContributionContext, PaintContributionItem, SceneOpacity,
-        SceneShape, StyleEnvironment, UiApp, View, Widget, WidgetMeasure, WidgetMeasureInput,
+        PaintContribution, PaintContributionContext, PaintContributionGroup, PaintContributionItem,
+        SceneOpacity, SceneShape, StyleEnvironment, UiApp, View, Widget, WidgetMeasure,
+        WidgetMeasureInput,
     };
     use runenui_runtime::{AppRuntime, LayoutConstraints, SurfaceBuildContext};
 
     use super::{SceneValidationError, UnsupportedSceneSemantic, validate_scene_subset};
+
+    fn literal_item() -> PaintContributionItem {
+        let rect = LogicalRect::try_new(0.0, 0.0, 20.0, 20.0)
+            .unwrap_or_else(|_| unreachable!("controlled rectangle is valid"));
+        PaintContributionItem::fill(SceneShape::rect(rect), Brush::solid(Color::WHITE))
+    }
 
     #[derive(Debug)]
     struct LiteralPaint;
@@ -312,12 +319,26 @@ mod tests {
         }
 
         fn paint(&self, (): &Self::State, _: PaintContributionContext) -> PaintContribution {
-            let rect = LogicalRect::try_new(0.0, 0.0, 20.0, 20.0)
-                .unwrap_or_else(|_| unreachable!("controlled rectangle is valid"));
-            PaintContribution::single(PaintContributionItem::fill(
-                SceneShape::rect(rect),
-                Brush::solid(Color::WHITE),
-            ))
+            PaintContribution::single(literal_item())
+        }
+    }
+
+    #[derive(Debug)]
+    struct ExplicitGroupedPaint;
+
+    impl Widget<()> for ExplicitGroupedPaint {
+        type State = ();
+
+        fn create_state(&self) -> Self::State {}
+
+        fn measure(&self, (): &Self::State, _: WidgetMeasureInput) -> WidgetMeasure {
+            WidgetMeasure::measured(LogicalLength::from(20_u16), LogicalLength::from(20_u16))
+        }
+
+        fn paint(&self, (): &Self::State, _: PaintContributionContext) -> PaintContribution {
+            PaintContribution::from_entries(vec![
+                PaintContributionGroup::new(vec![literal_item().into()]).into(),
+            ])
         }
     }
 
@@ -342,17 +363,54 @@ mod tests {
         }
     }
 
-    #[test]
-    fn grouped_runtime_publication_fails_closed_before_wgpu_subset_realization() {
-        let mut runtime = AppRuntime::<GroupedApp>::mount(());
+    struct ExplicitGroupedApp;
+
+    impl UiApp for ExplicitGroupedApp {
+        type State = ();
+        type Action = ();
+        type HostProtocol = NoHostProtocol;
+
+        fn root((): &Self::State) -> impl View<Self::Action> {
+            Element::new(ExplicitGroupedPaint)
+        }
+
+        fn update(
+            (): &mut Self::State,
+            (): Self::Action,
+        ) -> impl IntoEffects<Self::Action, Self::HostProtocol> {
+        }
+    }
+
+    fn publish<App: UiApp<State = (), Action = (), HostProtocol = NoHostProtocol>>() -> runenui_runtime::SurfacePublication {
+        let mut runtime = AppRuntime::<App>::mount(());
         let environment = StyleEnvironment::default();
-        let publication = runtime
+        runtime
             .publish_surface(&SurfaceBuildContext::new(
                 &environment,
                 LayoutConstraints::unbounded(),
             ))
-            .unwrap_or_else(|_| unreachable!("controlled publication is admitted"));
+            .unwrap_or_else(|_| unreachable!("controlled publication is admitted"))
+    }
+
+    #[test]
+    fn grouped_runtime_publication_fails_closed_before_wgpu_subset_realization() {
+        let publication = publish::<GroupedApp>();
         assert_eq!(publication.paint_scene().groups().len(), 1);
+
+        assert_eq!(
+            validate_scene_subset(publication.paint_publication()),
+            Err(SceneValidationError::UnsupportedItem {
+                item_index: 0,
+                semantic: UnsupportedSceneSemantic::CompositionGroup,
+            })
+        );
+    }
+
+    #[test]
+    fn explicit_owner_local_group_fails_closed_before_wgpu_subset_realization() {
+        let publication = publish::<ExplicitGroupedApp>();
+        assert_eq!(publication.paint_scene().groups().len(), 1);
+        assert_eq!(publication.paint_scene().groups()[0].opacity(), SceneOpacity::OPAQUE);
 
         assert_eq!(
             validate_scene_subset(publication.paint_publication()),
