@@ -10,9 +10,10 @@ use crate::scene::{HitTestRegion, HitTestSceneContent, PaintScene, PaintSceneIte
 use crate::style_debug::{SurfaceStyleNode, SurfaceStyleReport};
 use runenui_core::{
     __runtime::transform_rect_aabb, Color, ContributionClip, ElementId, HitContributionContext,
-    LayoutStyle, LogicalPoint, LogicalRect, LogicalTransform, PaintContributionContext,
-    PaintContributionItem, StyleEffects, StyleEnvironment, StyleInteractionState, StyleResolution,
-    WidgetDiagnostic, WidgetTypeId, resolve_style_in_environment, style_effects_between,
+    LayoutStyle, LogicalPoint, LogicalRect, LogicalTransform, PaintContribution,
+    PaintContributionContext, PaintContributionItem, StyleEffects, StyleEnvironment,
+    StyleInteractionState, StyleResolution, WidgetDiagnostic, WidgetTypeId,
+    resolve_style_in_environment, style_effects_between,
 };
 use runenui_text::TextSystem;
 
@@ -363,6 +364,74 @@ fn text_run_item(run: &runenui_text::TextRun, style: &StyleResolution) -> PaintC
     .unwrap_or_else(|_| unreachable!("logical text artifacts issue shaped-text resource refs"))
 }
 
+fn append_paint_contribution(
+    contribution: &PaintContribution,
+    mounted_preorder: usize,
+    owner_to_surface: LogicalTransform,
+    diagnostics: &mut Vec<WidgetDiagnostic>,
+    explicit_groups: &mut Vec<groups::ResolvedExplicitGroup>,
+    ordered: &mut Vec<groups::OrderedPaintItem>,
+) -> usize {
+    let local_groups = explicit_groups::append_resolved_explicit_groups(
+        contribution,
+        mounted_preorder,
+        owner_to_surface,
+        diagnostics,
+        explicit_groups,
+    );
+    for (contribution_local_order, item) in contribution.items().iter().enumerate() {
+        let explicit_group = match contribution.__runtime_item_group(contribution_local_order) {
+            Some(local_group) => {
+                let Some(group) = local_groups.get(local_group).copied().flatten() else {
+                    continue;
+                };
+                Some(group)
+            }
+            None => None,
+        };
+        let Ok(local_to_surface) = item.local_transform().then(owner_to_surface) else {
+            diagnostics.push(scene_transform_diagnostic(
+                SceneContributionFamily::Paint,
+                contribution_local_order,
+                None,
+                true,
+            ));
+            continue;
+        };
+        if local_to_surface.inverse().is_none() {
+            diagnostics.push(scene_transform_diagnostic(
+                SceneContributionFamily::Paint,
+                contribution_local_order,
+                None,
+                false,
+            ));
+        }
+        let Some(clips) = compose_scene_clips(
+            item.clips(),
+            owner_to_surface,
+            SceneContributionFamily::Paint,
+            contribution_local_order,
+            diagnostics,
+        ) else {
+            continue;
+        };
+        ordered.push(groups::OrderedPaintItem::new(
+            item.layer(),
+            mounted_preorder,
+            contribution_local_order,
+            explicit_group,
+            PaintSceneItem::new(
+                image_mapping::publication_primitive(item),
+                local_to_surface,
+                clips,
+                item.opacity(),
+                item.layer(),
+            ),
+        ));
+    }
+    contribution.items().len()
+}
+
 pub(super) fn resolve_paint(
     topology: &SurfaceTopologySnapshot,
     layout: &CachedLayoutFacts,
@@ -379,69 +448,18 @@ pub(super) fn resolve_paint(
     let mut shaped_text_leases = Vec::new();
     for (mounted_preorder, node) in topology.nodes.iter().enumerate() {
         let owner_to_surface = presentation.node(mounted_preorder).owner_to_surface();
-        let mut next_local_order = 0;
-        if let Some(contribution) = capabilities.paint_at(mounted_preorder, &node.id) {
-            let local_groups = explicit_groups::append_resolved_explicit_groups(
-                &contribution,
-                mounted_preorder,
-                owner_to_surface,
-                &mut diagnostics[mounted_preorder],
-                &mut explicit_groups,
-            );
-            for (contribution_local_order, item) in contribution.items().iter().enumerate() {
-                next_local_order = contribution_local_order + 1;
-                let explicit_group = match contribution
-                    .__runtime_item_group(contribution_local_order)
-                {
-                    Some(local_group) => {
-                        let Some(group) = local_groups.get(local_group).copied().flatten() else {
-                            continue;
-                        };
-                        Some(group)
-                    }
-                    None => None,
-                };
-                let Ok(local_to_surface) = item.local_transform().then(owner_to_surface) else {
-                    diagnostics[mounted_preorder].push(scene_transform_diagnostic(
-                        SceneContributionFamily::Paint,
-                        contribution_local_order,
-                        None,
-                        true,
-                    ));
-                    continue;
-                };
-                if local_to_surface.inverse().is_none() {
-                    diagnostics[mounted_preorder].push(scene_transform_diagnostic(
-                        SceneContributionFamily::Paint,
-                        contribution_local_order,
-                        None,
-                        false,
-                    ));
-                }
-                let Some(clips) = compose_scene_clips(
-                    item.clips(),
-                    owner_to_surface,
-                    SceneContributionFamily::Paint,
-                    contribution_local_order,
-                    &mut diagnostics[mounted_preorder],
-                ) else {
-                    continue;
-                };
-                ordered.push(groups::OrderedPaintItem::new(
-                    item.layer(),
+        let mut next_local_order = capabilities
+            .paint_at(mounted_preorder, &node.id)
+            .map_or(0, |contribution| {
+                append_paint_contribution(
+                    &contribution,
                     mounted_preorder,
-                    contribution_local_order,
-                    explicit_group,
-                    PaintSceneItem::new(
-                        image_mapping::publication_primitive(item),
-                        local_to_surface,
-                        clips,
-                        item.opacity(),
-                        item.layer(),
-                    ),
-                ));
-            }
-        }
+                    owner_to_surface,
+                    &mut diagnostics[mounted_preorder],
+                    &mut explicit_groups,
+                    &mut ordered,
+                )
+            });
 
         if let Some(artifact) = layout.text_layouts[mounted_preorder].artifact() {
             for line in artifact.lines() {
