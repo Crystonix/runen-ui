@@ -1,8 +1,6 @@
 //! Typed authored values for common M9 node-visual style properties.
 
-use crate::{
-    DropShadow, OpacityToken, Outline, OutlineToken, SceneOpacity, ShadowToken,
-};
+use crate::{DropShadow, OpacityToken, Outline, OutlineToken, SceneOpacity, ShadowToken};
 
 /// Literal-or-token authored value for the optional node outline.
 #[derive(Clone, Debug, PartialEq)]
