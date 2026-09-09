@@ -554,12 +554,7 @@ impl ResolutionBuilder {
             computed_style = computed_style.with_outline(value);
         }
 
-        StyleResolution::new(
-            computed_style,
-            provenance,
-            unresolved_tokens,
-            diagnostics,
-        )
+        StyleResolution::new(computed_style, provenance, unresolved_tokens, diagnostics)
     }
 }
 
