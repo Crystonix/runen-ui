@@ -374,7 +374,7 @@ fn node_decoration_shape(bounds: LogicalRect, style: &StyleResolution) -> SceneS
 }
 
 fn append_runtime_paint_item(
-    item: PaintContributionItem,
+    item: &PaintContributionItem,
     mounted_preorder: usize,
     contribution_local_order: usize,
     owner_to_surface: LogicalTransform,
@@ -489,7 +489,7 @@ pub(super) fn resolve_paint(
         if let (Some(shape), Some(background)) = (decoration_shape.as_ref(), computed.background())
         {
             append_runtime_paint_item(
-                PaintContributionItem::fill(shape.clone(), background.clone()),
+                &PaintContributionItem::fill(shape.clone(), background.clone()),
                 mounted_preorder,
                 next_local_order,
                 owner_to_surface,
@@ -523,7 +523,7 @@ pub(super) fn resolve_paint(
                     shaped_text_leases.push(lease);
                     let item = text_run_item(run, &styles.resolutions[mounted_preorder]);
                     append_runtime_paint_item(
-                        item,
+                        &item,
                         mounted_preorder,
                         next_local_order,
                         owner_to_surface,
@@ -536,7 +536,7 @@ pub(super) fn resolve_paint(
 
         if let (Some(shape), Some(outline)) = (decoration_shape.as_ref(), computed.outline()) {
             append_runtime_paint_item(
-                PaintContributionItem::stroke(
+                &PaintContributionItem::stroke(
                     shape.clone(),
                     outline.brush().clone(),
                     outline.style(),
