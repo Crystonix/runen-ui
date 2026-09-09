@@ -13,7 +13,9 @@ pub fn transform_rect_aabb(transform: LogicalTransform, rect: LogicalRect) -> Op
         LogicalPoint::new(rect.x(), max_y).ok()?,
         LogicalPoint::new(max_x, max_y).ok()?,
     ];
-    let mut projected = corners.into_iter().map(|point| transform.transform_point(point));
+    let mut projected = corners
+        .into_iter()
+        .map(|point| transform.transform_point(point));
     let first = projected.next()??;
     let mut min_x = first.x();
     let mut max_x = first.x();
@@ -70,6 +72,9 @@ mod tests {
     fn rejects_unrepresentable_transformed_geometry() {
         let scale = LogicalTransform::try_new(f32::MAX, 0.0, 0.0, 1.0, 0.0, 0.0)
             .unwrap_or_else(|_| unreachable!());
-        assert_eq!(transform_rect_aabb(scale, rect(0.0, 0.0, 2.0, 1.0)), None);
+        assert_eq!(
+            transform_rect_aabb(scale, rect(0.0, 0.0, 2.0, 1.0)),
+            None
+        );
     }
 }

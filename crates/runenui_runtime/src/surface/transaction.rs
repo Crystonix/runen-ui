@@ -118,7 +118,7 @@ impl<'a> PlannedSurfacePublication<'a> {
         if candidate.diagnostics.iter().any(|diagnostic| {
             matches!(
                 diagnostic,
-                SemanticCompositionDiagnostic::UnrepresentableBounds
+                SemanticCompositionDiagnostic::UnrepresentableBounds { .. }
             )
         }) {
             return Err(SurfacePlanningError::PresentationGeometry);

@@ -43,7 +43,7 @@ fn approx_eq(left: f32, right: f32) {
 
 #[test]
 fn static_presentation_translation_correlates_paint_hit_and_semantic_geometry_without_layout_mutation()
-{
+ {
     let mut runtime = AppRuntime::<PresentationGeometryApp>::mount(());
     let environment = StyleEnvironment::default();
     let publication = runtime
@@ -102,7 +102,13 @@ fn static_presentation_translation_correlates_paint_hit_and_semantic_geometry_wi
     .unwrap_or_else(|_| unreachable!("controlled hit point is finite"));
     assert_eq!(
         publication.hit_test_scene().target_at(hit_point),
-        Some(publication.frame().root().unwrap_or_else(|| unreachable!()).id())
+        Some(
+            publication
+                .frame()
+                .root()
+                .unwrap_or_else(|| unreachable!())
+                .id()
+        )
     );
 
     // Presentation changes publication geometry only; the retained layout/debug

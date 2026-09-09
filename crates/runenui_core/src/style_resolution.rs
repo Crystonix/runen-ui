@@ -549,7 +549,8 @@ impl ResolutionBuilder {
                         StyleFieldProvenance::ResolvedToken(token.clone());
                 } else {
                     self.presentation = None;
-                    self.provenance.presentation = StyleFieldProvenance::MissingToken(token.clone());
+                    self.provenance.presentation =
+                        StyleFieldProvenance::MissingToken(token.clone());
                     self.record_missing(UnresolvedStyleToken::Presentation(token.clone()));
                 }
             }

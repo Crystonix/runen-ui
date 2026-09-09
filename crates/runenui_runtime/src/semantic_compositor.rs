@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use runenui_core::{
-    ElementId, Focusability, LogicalRect, LogicalTransform, MountedNodeId, SemanticAction,
-    SemanticBounds, SemanticContribution, SemanticItem, SemanticKey, SemanticNodeContribution,
-    SemanticReference, SemanticRelationshipKind, SemanticRole, SemanticText, SemanticValue,
-    WidgetActivation, __runtime::transform_rect_aabb,
+    __runtime::transform_rect_aabb, ElementId, Focusability, LogicalRect, LogicalTransform,
+    MountedNodeId, SemanticAction, SemanticBounds, SemanticContribution, SemanticItem, SemanticKey,
+    SemanticNodeContribution, SemanticReference, SemanticRelationshipKind, SemanticRole,
+    SemanticText, SemanticValue, WidgetActivation,
 };
 
 use crate::SemanticNodeId;
@@ -67,9 +67,7 @@ pub enum SemanticCompositionDiagnostic {
         element_id: ElementId,
         key: SemanticKey,
     },
-    UnrepresentableBounds {
-        source: SemanticNodeId,
-    },
+    UnrepresentableBounds { source: SemanticNodeId },
     FocusedOwnerMissingVisiblePrimary,
 }
 
@@ -456,7 +454,9 @@ mod tests {
         WidgetActivation,
     };
 
-    use super::{SemanticCandidate, SemanticCompositionDiagnostic, SemanticOwnerFacts, compose_semantics};
+    use super::{
+        SemanticCandidate, SemanticCompositionDiagnostic, SemanticOwnerFacts, compose_semantics,
+    };
 
     fn rect(x: f32, y: f32, width: f32, height: f32) -> LogicalRect {
         LogicalRect::new(

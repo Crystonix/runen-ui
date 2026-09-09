@@ -7,10 +7,10 @@ use crate::mounted::SurfaceCapabilityPlan;
 use crate::scene::{HitTestRegion, HitTestSceneContent, PaintScene, PaintSceneItem, SceneClip};
 use crate::style_debug::{SurfaceStyleNode, SurfaceStyleReport};
 use runenui_core::{
-    Color, ContributionClip, ElementId, HitContributionContext, LayoutStyle, LogicalPoint,
-    LogicalRect, LogicalTransform, PaintContributionContext, PaintContributionItem, StyleEffects,
-    StyleEnvironment, StyleInteractionState, StyleResolution, WidgetDiagnostic, WidgetTypeId,
-    __runtime::transform_rect_aabb, resolve_style_in_environment, style_effects_between,
+    __runtime::transform_rect_aabb, Color, ContributionClip, ElementId, HitContributionContext,
+    LayoutStyle, LogicalPoint, LogicalRect, LogicalTransform, PaintContributionContext,
+    PaintContributionItem, StyleEffects, StyleEnvironment, StyleInteractionState, StyleResolution,
+    WidgetDiagnostic, WidgetTypeId, resolve_style_in_environment, style_effects_between,
 };
 use runenui_text::TextSystem;
 
@@ -244,8 +244,8 @@ pub(super) fn resolve_presentation(
             .map_err(|_| PresentationGeometryError)?;
         let local_bounds = LogicalRect::try_new(0.0, 0.0, bounds.width(), bounds.height())
             .unwrap_or_else(|_| unreachable!("published layout size is valid"));
-        let owner_bounds = transform_rect_aabb(owner_to_surface, local_bounds)
-            .ok_or(PresentationGeometryError)?;
+        let owner_bounds =
+            transform_rect_aabb(owner_to_surface, local_bounds).ok_or(PresentationGeometryError)?;
         nodes.push(PresentationNodeFacts::new(owner_to_surface, owner_bounds));
     }
     Ok(CachedPresentationFacts { nodes })
