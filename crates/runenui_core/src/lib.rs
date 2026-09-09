@@ -235,6 +235,7 @@ mod identity;
 mod input;
 mod layout;
 mod paint;
+mod paint_group;
 mod path;
 mod path_containment;
 mod pointer;
@@ -296,6 +297,7 @@ pub use paint::{
     ImagePrimitive, PaintContribution, PaintContributionContext, PaintContributionItem,
     PaintPrimitive, ShapedTextRunPrimitive,
 };
+pub use paint_group::{PaintContributionEntry, PaintContributionGroup};
 pub use path::{PathFillRule, PathVerb, ScenePath, ScenePathError};
 /// Unstable safe bridge from transient core elements to the mounted runtime.
 ///
