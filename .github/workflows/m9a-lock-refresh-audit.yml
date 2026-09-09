@@ -31,62 +31,69 @@ jobs:
           bounds = bounds_path.read_text()
 
           exhaustive_old = '''            (bounds, transform)
-                  }
-              };
-          '''
+        }
+    };
+'''
           exhaustive_new = '''            (bounds, transform)
-                  }
-                  _ => (PaintSceneBounds::Unbounded, item.local_to_surface()),
-              };
-          '''
+        }
+        _ => (PaintSceneBounds::Unbounded, item.local_to_surface()),
+    };
+'''
           if exhaustive_old in bounds:
               bounds = bounds.replace(exhaustive_old, exhaustive_new, 1)
           elif exhaustive_new not in bounds:
               raise SystemExit("paint primitive match no longer matches reviewed authority")
 
-          old = '''        SceneShape::Rect(rect)
-                  | SceneShape::RoundedRect { rect, .. }
-                  | SceneShape::Ellipse(rect) => {
-                      if rect.width() == 0.0 || rect.height() == 0.0 {
-                          return PaintSceneBounds::Empty;
-                      }
-                      *rect
-                  }
-          '''
-          new = '''        SceneShape::Rect(rect)
-                  | SceneShape::RoundedRect { rect, .. }
-                  | SceneShape::Ellipse(rect) => *rect,
-          '''
-          if old in bounds:
-              bounds = bounds.replace(old, new, 1)
-          elif new not in bounds:
+          stroke_old = '''        SceneShape::Rect(rect)
+        | SceneShape::RoundedRect { rect, .. }
+        | SceneShape::Ellipse(rect) => {
+            if rect.width() == 0.0 || rect.height() == 0.0 {
+                return PaintSceneBounds::Empty;
+            }
+            *rect
+        }
+'''
+          stroke_new = '''        SceneShape::Rect(rect)
+        | SceneShape::RoundedRect { rect, .. }
+        | SceneShape::Ellipse(rect) => *rect,
+'''
+          if stroke_old in bounds:
+              bounds = bounds.replace(stroke_old, stroke_new, 1)
+          elif stroke_new not in bounds:
               raise SystemExit("stroke-bound source no longer matches reviewed authority")
+
+          option_old = '.unwrap_or_else(|_| unreachable!("test intrinsic extent is valid"));'
+          option_new = '.unwrap_or_else(|| unreachable!("test intrinsic extent is valid"));'
+          if option_old in bounds:
+              bounds = bounds.replace(option_old, option_new, 1)
+          elif option_new not in bounds:
+              raise SystemExit("image intrinsic test no longer matches reviewed authority")
 
           regression = r'''
 
-              #[test]
-              fn positive_width_stroke_over_degenerate_rect_keeps_finite_conservative_bound() {
-                  let item = scene_item(
-                      PaintPrimitive::Stroke {
-                          shape: SceneShape::rect(rect(4.0, 5.0, 0.0, 10.0)),
-                          brush: Brush::solid(Color::BLACK),
-                          style: StrokeStyle::new(
-                              LogicalLength::new(2.0).unwrap_or_else(|_| unreachable!()),
-                          ),
-                      },
-                      LogicalTransform::IDENTITY,
-                      Vec::new(),
-                  );
-                  let Some(PaintSceneBounds::Finite(bounds)) = scene(vec![item]).item_bounds(0)
-                  else {
-                      unreachable!("positive-width degenerate stroke keeps finite conservative bounds")
-                  };
-                  assert!(bounds.x() < 4.0);
-                  assert!(bounds.y() < 5.0);
-                  assert!(bounds.max_x() > 4.0);
-                  assert!(bounds.max_y() > 15.0);
-              }
-          '''
+    #[test]
+    fn positive_width_stroke_over_degenerate_rect_keeps_finite_conservative_bound() {
+        let item = scene_item(
+            PaintPrimitive::Stroke {
+                shape: SceneShape::rect(rect(4.0, 5.0, 0.0, 10.0)),
+                brush: Brush::solid(Color::BLACK),
+                style: StrokeStyle::new(
+                    LogicalLength::new(2.0).unwrap_or_else(|_| unreachable!()),
+                ),
+            },
+            LogicalTransform::IDENTITY,
+            Vec::new(),
+        );
+        let Some(PaintSceneBounds::Finite(bounds)) = scene(vec![item]).item_bounds(0)
+        else {
+            unreachable!("positive-width degenerate stroke keeps finite conservative bounds")
+        };
+        assert!(bounds.x() < 4.0);
+        assert!(bounds.y() < 5.0);
+        assert!(bounds.max_x() > 4.0);
+        assert!(bounds.max_y() > 15.0);
+    }
+'''
           if "positive_width_stroke_over_degenerate_rect_keeps_finite_conservative_bound" not in bounds:
               close = bounds.rfind("\n}")
               if close < 0:
@@ -110,34 +117,34 @@ jobs:
               )
           runtime_proof = r'''
 
-          #[test]
-          fn runtime_publication_retains_finite_logical_shaped_text_bounds() {
-              let mut runtime = AppRuntime::<PresentationGeometryApp>::mount(());
-              let environment = StyleEnvironment::default();
-              let publication = runtime
-                  .publish_surface(&SurfaceBuildContext::new(
-                      &environment,
-                      LayoutConstraints::unbounded(),
-                  ))
-                  .unwrap_or_else(|_| unreachable!("controlled text publication is admitted"));
-              let scene = publication.paint_scene();
-              let (item_index, item) = scene
-                  .items()
-                  .iter()
-                  .enumerate()
-                  .find(|(_, item)| matches!(item.primitive(), PaintPrimitive::ShapedTextRun(_)))
-                  .unwrap_or_else(|| unreachable!("button label contributes shaped text"));
-              let PaintPrimitive::ShapedTextRun(run) = item.primitive() else {
-                  unreachable!("selected item is shaped text")
-              };
-              assert!(scene.shaped_text_resource(run.resource_ref()).is_some());
-              let Some(PaintSceneBounds::Finite(bounds)) = scene.item_bounds(item_index) else {
-                  unreachable!("retained ordinary shaped text has finite logical ink bounds")
-              };
-              assert!(bounds.width() > 0.0);
-              assert!(bounds.height() > 0.0);
-          }
-          '''
+#[test]
+fn runtime_publication_retains_finite_logical_shaped_text_bounds() {
+    let mut runtime = AppRuntime::<PresentationGeometryApp>::mount(());
+    let environment = StyleEnvironment::default();
+    let publication = runtime
+        .publish_surface(&SurfaceBuildContext::new(
+            &environment,
+            LayoutConstraints::unbounded(),
+        ))
+        .unwrap_or_else(|_| unreachable!("controlled text publication is admitted"));
+    let scene = publication.paint_scene();
+    let (item_index, item) = scene
+        .items()
+        .iter()
+        .enumerate()
+        .find(|(_, item)| matches!(item.primitive(), PaintPrimitive::ShapedTextRun(_)))
+        .unwrap_or_else(|| unreachable!("button label contributes shaped text"));
+    let PaintPrimitive::ShapedTextRun(run) = item.primitive() else {
+        unreachable!("selected item is shaped text")
+    };
+    assert!(scene.shaped_text_resource(run.resource_ref()).is_some());
+    let Some(PaintSceneBounds::Finite(bounds)) = scene.item_bounds(item_index) else {
+        unreachable!("retained ordinary shaped text has finite logical ink bounds")
+    };
+    assert!(bounds.width() > 0.0);
+    assert!(bounds.height() > 0.0);
+}
+'''
           if "runtime_publication_retains_finite_logical_shaped_text_bounds" not in integration:
               integration += runtime_proof
           integration_path.write_text(integration)
