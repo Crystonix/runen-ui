@@ -196,6 +196,7 @@ mod debug;
 mod focus;
 mod input;
 mod mounted;
+mod paint_bounds;
 mod pointer;
 pub mod prelude;
 mod pump;
@@ -242,6 +243,7 @@ pub use mounted::{
     AutomationMatchDiagnostic, DuplicateIdentityKind, IdentityDiagnostic, InteractionStateRef,
     MountedNodeId, MountedNodeRef, MountedTreeIndex, SemanticNodeId,
 };
+pub use paint_bounds::PaintSceneBounds;
 pub use pointer::{PointerSubmission, SubmitPointerError, SubmitPointerErrorKind};
 pub use pump::{PumpBudget, PumpBudgetExhaustion, PumpOutcome, PumpReport};
 pub use queue::{SubmitActionError, SubmitActionErrorKind, SubmitActionResult, WorkSequence};
