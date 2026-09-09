@@ -14,7 +14,7 @@ fn rect() -> LogicalRect {
         .unwrap_or_else(|_| unreachable!("controlled rectangle is valid"))
 }
 
-fn color(red: u8) -> Color {
+const fn color(red: u8) -> Color {
     Color::rgba(red, 0, 0, 255)
 }
 
@@ -252,23 +252,23 @@ fn sibling_groups_contract_by_first_member_and_descendant_layers_do_not_escape()
     assert_eq!(scene.groups().len(), 2);
     assert_eq!(scene.root_entries().len(), 2);
 
-    let group_a_id = only_group(scene.root_entries()[0]);
-    let group_b_id = only_group(scene.root_entries()[1]);
-    let group_a = scene
-        .group(group_a_id)
+    let early_anchor_id = only_group(scene.root_entries()[0]);
+    let late_anchor_id = only_group(scene.root_entries()[1]);
+    let early_group = scene
+        .group(early_anchor_id)
         .unwrap_or_else(|| unreachable!("first sibling group resolves"));
-    let group_b = scene
-        .group(group_b_id)
+    let late_group = scene
+        .group(late_anchor_id)
         .unwrap_or_else(|| unreachable!("second sibling group resolves"));
 
-    assert_eq!(group_a.parent(), None);
-    assert_eq!(group_b.parent(), None);
-    assert_eq!(entry_items(group_a.entries()), vec![Some(0), Some(3)]);
-    assert_eq!(entry_items(group_b.entries()), vec![Some(1), Some(2)]);
-    assert_eq!(scene.items()[0].group(), Some(group_a_id));
-    assert_eq!(scene.items()[3].group(), Some(group_a_id));
-    assert_eq!(scene.items()[1].group(), Some(group_b_id));
-    assert_eq!(scene.items()[2].group(), Some(group_b_id));
+    assert_eq!(early_group.parent(), None);
+    assert_eq!(late_group.parent(), None);
+    assert_eq!(entry_items(early_group.entries()), vec![Some(0), Some(3)]);
+    assert_eq!(entry_items(late_group.entries()), vec![Some(1), Some(2)]);
+    assert_eq!(scene.items()[0].group(), Some(early_anchor_id));
+    assert_eq!(scene.items()[3].group(), Some(early_anchor_id));
+    assert_eq!(scene.items()[1].group(), Some(late_anchor_id));
+    assert_eq!(scene.items()[2].group(), Some(late_anchor_id));
 }
 
 #[test]
