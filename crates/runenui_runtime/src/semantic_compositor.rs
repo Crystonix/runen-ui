@@ -67,7 +67,9 @@ pub enum SemanticCompositionDiagnostic {
         element_id: ElementId,
         key: SemanticKey,
     },
-    UnrepresentableBounds { source: SemanticNodeId },
+    UnrepresentableBounds {
+        source: SemanticNodeId,
+    },
     FocusedOwnerMissingVisiblePrimary,
 }
 
@@ -252,9 +254,7 @@ impl<'a> SemanticCompositor<'a> {
             authored.bounds(),
         ) else {
             self.diagnostics
-                .push(SemanticCompositionDiagnostic::UnrepresentableBounds {
-                    source: id,
-                });
+                .push(SemanticCompositionDiagnostic::UnrepresentableBounds { source: id });
             return Vec::new();
         };
         let node = SemanticCandidateNode {

@@ -72,9 +72,6 @@ mod tests {
     fn rejects_unrepresentable_transformed_geometry() {
         let scale = LogicalTransform::try_new(f32::MAX, 0.0, 0.0, 1.0, 0.0, 0.0)
             .unwrap_or_else(|_| unreachable!());
-        assert_eq!(
-            transform_rect_aabb(scale, rect(0.0, 0.0, 2.0, 1.0)),
-            None
-        );
+        assert_eq!(transform_rect_aabb(scale, rect(0.0, 0.0, 2.0, 1.0)), None);
     }
 }
