@@ -86,7 +86,10 @@ define_token_ref!(SpacingToken, "Typed edge-spacing-token reference.");
 define_token_ref!(RadiusToken, "Typed corner-radius-token reference.");
 define_token_ref!(TypographyToken, "Typed metric-typography-token reference.");
 define_token_ref!(OutlineToken, "Typed node-outline-token reference.");
-define_token_ref!(ShadowToken, "Typed ordered drop-shadow-list-token reference.");
+define_token_ref!(
+    ShadowToken,
+    "Typed ordered drop-shadow-list-token reference."
+);
 define_token_ref!(OpacityToken, "Typed node-opacity-token reference.");
 
 macro_rules! define_style_id {
