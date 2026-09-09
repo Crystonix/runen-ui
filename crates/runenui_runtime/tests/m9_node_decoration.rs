@@ -67,7 +67,7 @@ fn register_font<App: UiApp>(runtime: &mut AppRuntime<App>) {
         .unwrap_or_else(|_| unreachable!("controlled generic mapping is valid"));
 }
 
-fn solid_fill_color(item: &PaintSceneItem) -> Option<Color> {
+const fn solid_fill_color(item: &PaintSceneItem) -> Option<Color> {
     match item.primitive() {
         PaintPrimitive::Fill {
             brush: Brush::Solid(color),
@@ -77,7 +77,7 @@ fn solid_fill_color(item: &PaintSceneItem) -> Option<Color> {
     }
 }
 
-fn solid_stroke_color(item: &PaintSceneItem) -> Option<Color> {
+const fn solid_stroke_color(item: &PaintSceneItem) -> Option<Color> {
     match item.primitive() {
         PaintPrimitive::Stroke {
             brush: Brush::Solid(color),
@@ -85,6 +85,10 @@ fn solid_stroke_color(item: &PaintSceneItem) -> Option<Color> {
         } => Some(*color),
         _ => None,
     }
+}
+
+fn approx_eq(left: f32, right: f32) {
+    assert!((left - right).abs() <= 1.0e-4, "{left} != {right}");
 }
 
 fn find_fill(publication: &SurfacePublication, color: Color) -> usize {
@@ -232,10 +236,10 @@ fn rounded_decoration_preserves_m6_layer_and_local_text_order() {
         unreachable!("non-zero node radius publishes a rounded background")
     };
     assert_eq!(*radius, expected_radius);
-    assert_eq!(rect.x(), 0.0);
-    assert_eq!(rect.y(), 0.0);
-    assert_eq!(rect.width(), expected_bounds.width());
-    assert_eq!(rect.height(), expected_bounds.height());
+    approx_eq(rect.x(), 0.0);
+    approx_eq(rect.y(), 0.0);
+    approx_eq(rect.width(), expected_bounds.width());
+    approx_eq(rect.height(), expected_bounds.height());
 
     let PaintPrimitive::Stroke {
         shape:
@@ -333,7 +337,7 @@ fn runtime_decoration_stays_outside_explicit_group_but_inside_node_effect_group(
         .entries()
         .iter()
         .copied()
-        .find_map(|entry| entry.group_id())
+        .find_map(runenui_runtime::PaintSceneEntry::group_id)
         .unwrap_or_else(|| unreachable!("widget-authored explicit group remains nested"));
     let explicit_group = scene
         .group(explicit_group_id)
