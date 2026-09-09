@@ -147,9 +147,7 @@ pub struct NormalizedPaintContribution {
     pub(super) item_groups: Vec<Option<usize>>,
 }
 
-pub fn normalize_entries(
-    entries: Vec<PaintContributionEntry>,
-) -> NormalizedPaintContribution {
+pub fn normalize_entries(entries: Vec<PaintContributionEntry>) -> NormalizedPaintContribution {
     let mut normalized = NormalizedPaintContribution {
         items: Vec::new(),
         groups: Vec::new(),
