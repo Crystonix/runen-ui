@@ -34,17 +34,22 @@ group. Per-child opacity is not an equivalent escape because overlapping childre
 must receive group opacity once after their composed result.
 
 ADR 0010 says runtime owns exact scene ordering and snapshot-local group
-nesting/order, but it does not freeze the parent insertion point for such a group or
-the exact mounted scope of node opacity/shadows. Leaving either choice to runtime or
-renderer implementation would create an accidental second scene-order authority.
+nesting/order, but it does not freeze the parent insertion point for such a group, the
+exact mounted scope of node opacity/shadows, or the exact predicate that makes a node
+effect create/remove isolation. The last omission is observable even for visually
+identity-valued effects because inserting or removing an atomic group can itself
+change stacking through contraction. Leaving any of those choices to runtime or
+renderer optimization would create accidental scene-order authority.
 
 ## Relationship to ADR 0010 and ADR 0011
 
 This ADR **narrowly amends ADR 0010** only for:
 
 1. the relationship between inherited M6 `PAINT-05` order and atomic M9 groups;
-2. deterministic group insertion/ordered membership; and
-3. the mounted visual-subtree scope of node opacity and ordinary node shadows.
+2. deterministic group insertion/ordered membership;
+3. the mounted visual-subtree scope of node opacity and ordinary node shadows; and
+4. the exact runtime-derived node-effect isolation predicate, including its interaction
+   with active opacity/shadow motion.
 
 For those subjects, ADR 0012 controls. ADR 0011 continues to control path-fill,
 stroke-closure, ellipse, and signed-shadow-spread/effect-bound semantics. Every other
@@ -90,6 +95,11 @@ at that first-member anchor. Consequently, an outside item that previously sorte
 between two descendants no longer interleaves the isolated group; when the group's
 first descendant precedes that outside item, the complete group precedes it.
 
+`SceneLayer` values of descendant items remain part of the pre-group ordering inside
+the isolated group, but no descendant layer may escape its ancestor group and re-enter
+the parent's global ordering after contraction. This is the stacking-context effect of
+isolation, not a second interpretation of `SceneLayer`.
+
 This loss of outside interleaving is the only intentional M9 qualification of M6
 `PAINT-05`, and it is a necessary semantic consequence of explicit group isolation.
 It is not backend behavior.
@@ -114,11 +124,51 @@ nested group for that descendant. The nested result then participates as a child
 the ancestor group under the same contraction and effect-order rules.
 
 Node outline is ordinary paint-only node visual output. Outline alone does not create
-an isolation group and does not change the group ordering defined here.
+an isolation group and does not change the group ordering defined here. When an
+ancestor node-effect group exists, outline paint that belongs to that visual subtree is
+ordinary child coverage of that group like other node paint.
 
 Runtime-created node groups remain snapshot-local composition structure only. Their
 presence does not create mounted identity, reconciliation keys, semantic identity,
 widget state, lifecycle authority, or cross-publication identity.
+
+### Node-effect group existence is semantic, not an optimization
+
+Runtime must not decide node-effect isolation from renderer convenience, estimated
+coverage, alpha elision, or cache state. The exact predicate is part of staged scene
+semantics.
+
+Outside active motion, a runtime-derived node-effect group exists exactly when at least
+one of these resolved effective node facts requires it:
+
+- node opacity is not exactly `1`; or
+- the ordered ordinary-shadow list is non-empty.
+
+The ordinary default `opacity = 1` plus an empty shadow list therefore does **not**
+turn every mounted node into a stacking context. Conversely, a non-empty shadow list
+creates isolation even if every current shadow happens to produce empty or transparent
+visual coverage; optimizing such a list away must not change ordering. A node opacity
+value of exactly `1` by itself creates no runtime-derived group.
+
+An explicit structurally non-empty owner-local composition group is different: the
+group itself is authored composition intent and therefore isolates regardless of
+whether its opacity/effects are identity-valued. Structurally empty groups retain the
+omission rule above.
+
+For M9B motion, group existence is derived from the staged candidate, never from a
+renderer frame. A live node-opacity or node-shadow motion keeps the runtime-derived
+group present when either the current sampled effective value requires isolation under
+the static predicate above **or** that live motion's canonical target requires
+isolation. This makes identity-to-effect motion establish the stacking context in its
+successful start candidate and keeps effect-to-identity motion isolated while a
+non-identity sample remains live.
+
+A candidate that atomically completes motion evaluates this predicate against the
+post-completion motion state: the completed record does not keep an otherwise identity
+node isolated. Replacement uses the surviving replacement motion/target after the
+accepted cancellation/replacement ordering. Group creation/removal, the sampled
+property product, and motion lifetime state commit atomically with the staged
+publication.
 
 ### Explicit owner-local groups remain locally owned
 
@@ -153,8 +203,12 @@ semantic geometry.
 - M6 ordering remains directly observable and unchanged for ungrouped scenes.
 - Creating an isolation group is explicitly a stacking-context operation; members no
   longer interleave with outside items after contraction.
+- Descendant `SceneLayer` values order descendants before contraction but cannot escape
+  an ancestor stacking context.
 - Runtime can derive group order solely from accepted paint facts and snapshot-local
   membership, without a new public group-layer vocabulary.
+- Exact node-effect group existence is framework behavior, so renderer/cache
+  optimizations cannot add or remove stacking contexts.
 - Renderer implementations receive already-decided group structure/order and may use
   any disposable offscreen/cache strategy that realizes the same semantics.
 - Node opacity/shadows can be implemented once over composed subtree coverage instead
@@ -185,6 +239,12 @@ Rejected because it would unnecessarily replace accepted M6 global layer semanti
 for ungrouped scenes. M9 qualifies ordering only where explicit isolation makes the
 old interleaving impossible.
 
+### Elide identity-looking effect groups opportunistically
+
+Rejected because group presence itself can alter stacking. Runtime may omit only the
+cases permitted by the exact predicate above; transparent shadow coverage, renderer
+alpha elision, cache state, or estimated visibility cannot redefine isolation.
+
 ## Conformance consequences
 
 M9 conformance keeps exactly 25 rows and all existing statuses. `M9VIS-07` must prove:
@@ -192,13 +252,22 @@ M9 conformance keeps exactly 25 rows and all existing statuses. `M9VIS-07` must 
 - exact inherited M6 pre-group order;
 - snapshot-local acyclic nesting and single immediate ownership;
 - first-member anchoring and recursive contraction;
-- sibling-group and outside-item pre-group interleaving cases;
+- sibling-group, cross-layer, and outside-item pre-group interleaving cases;
+- descendant layers cannot escape an isolated ancestor group;
 - exact behavior with no groups and empty groups; and
 - no mounted/semantic/cross-publication group identity leakage.
 
 `M9VIS-08` must additionally prove that node opacity/shadows operate over composed
-mounted visual-subtree coverage, nested effect nodes produce nested groups, group
-opacity applies once, ADR 0011 shadow bounds remain conservative, and effects do not
-leak into layout/hit/focus/semantic authority.
+mounted visual-subtree coverage, nested effect nodes produce nested groups, the static
+node-effect isolation predicate is exact (`opacity != 1` or non-empty shadow list),
+identity defaults do not group every node, a non-empty visually-empty shadow list is
+not optimized out as an ordering fact, group opacity applies once, ADR 0011 shadow
+bounds remain conservative, and effects do not leak into layout/hit/focus/semantic
+authority.
+
+M9B proof must preserve the same ordering semantics across motion. `M9MOTION-06` owns
+sample/target-driven group recomposition and invalidation without relayout, while
+`M9MOTION-09` owns atomic start/replacement/completion correlation between live motion
+state, group existence, and the staged publication.
 
 No row is promoted by accepting this architecture amendment.
