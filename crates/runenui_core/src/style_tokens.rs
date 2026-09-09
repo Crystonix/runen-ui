@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, btree_map::Entry};
 
 use crate::{
     Brush, BrushToken, Color, ColorToken, DropShadow, EdgeInsets, OpacityToken, Outline,
-    OutlineToken, Radius, RadiusToken, SceneOpacity, ShadowToken, SpacingToken, TokenId, Typography,
-    TypographyToken,
+    OutlineToken, Radius, RadiusToken, SceneOpacity, ShadowToken, SpacingToken, TokenId,
+    Typography, TypographyToken,
 };
 
 #[non_exhaustive]
