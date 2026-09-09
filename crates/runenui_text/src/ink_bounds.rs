@@ -81,9 +81,10 @@ impl ShapedTextResource {
         let colors = font.color_glyphs();
         let bitmaps = font.bitmap_strikes();
         let svg = font.svg().ok();
-        let skew = self.font().faux_skew().map_or(0.0_f64, |angle| {
-            f64::from(angle).tan()
-        });
+        let skew = self
+            .font()
+            .faux_skew()
+            .map_or(0.0_f64, |angle| f64::from(angle).tan());
         if !skew.is_finite() {
             return TextInkBounds::Unbounded;
         }
@@ -130,16 +131,17 @@ impl ShapedTextResource {
                 if !x.is_finite() || !y.is_finite() {
                     return TextInkBounds::Unbounded;
                 }
-                bounds.get_or_insert_with(|| Bounds::point(x, y)).include(x, y);
+                bounds
+                    .get_or_insert_with(|| Bounds::point(x, y))
+                    .include(x, y);
             }
         }
 
-        match bounds {
-            None => TextInkBounds::Empty,
-            Some(bounds) => bounds
+        bounds.map_or(TextInkBounds::Empty, |bounds| {
+            bounds
                 .logical_rect()
-                .map_or(TextInkBounds::Unbounded, TextInkBounds::Finite),
-        }
+                .map_or(TextInkBounds::Unbounded, TextInkBounds::Finite)
+        })
     }
 }
 
@@ -174,9 +176,7 @@ impl Bounds {
 }
 
 fn logical_rect_from_edges(min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Option<LogicalRect> {
-    if ![min_x, min_y, max_x, max_y]
-        .into_iter()
-        .all(f64::is_finite)
+    if ![min_x, min_y, max_x, max_y].into_iter().all(f64::is_finite)
         || max_x < min_x
         || max_y < min_y
     {
@@ -222,7 +222,8 @@ mod tests {
     use runenui_core::{FontFamily, LogicalLength, Typography};
 
     use crate::{
-        FontSourcePolicy, TextConstraints, TextInkBounds, TextLayoutState, TextRequest, TextSystem,
+        FontSourcePolicy, TextConstraints, TextInkBounds, TextLayoutState, TextLine, TextRequest,
+        TextRun, TextSystem,
     };
 
     const CANTARELL: &[u8] = include_bytes!("../tests/fixtures/Cantarell-Regular.ttf");
@@ -253,7 +254,7 @@ mod tests {
         let second = resource.logical_ink_bounds();
         assert_eq!(first, second);
         let TextInkBounds::Finite(rect) = first else {
-            panic!("ordinary outline text must have finite ink bounds");
+            unreachable!("ordinary outline text must have finite ink bounds");
         };
         assert!(rect.width() > 0.0);
         assert!(rect.height() > 0.0);
@@ -277,8 +278,8 @@ mod tests {
         for resource in artifact
             .lines()
             .iter()
-            .flat_map(|line| line.runs())
-            .map(|run| run.shaped_resource())
+            .flat_map(TextLine::runs)
+            .map(TextRun::shaped_resource)
         {
             saw_resource = true;
             assert!(resource.logical_ink_bounds().is_empty());

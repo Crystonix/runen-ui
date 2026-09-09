@@ -1,6 +1,6 @@
 use runenui_core::{
-    ImagePrimitive, LogicalRect, LogicalTransform, PaintPrimitive, SceneShape, StrokeJoin,
-    StrokeStyle, __runtime::transform_rect_aabb,
+    __runtime::transform_rect_aabb, ImagePrimitive, LogicalRect, LogicalTransform, PaintPrimitive,
+    SceneShape, StrokeCap, StrokeJoin, StrokeStyle,
 };
 use runenui_text::TextInkBounds;
 
@@ -68,15 +68,14 @@ fn derive_item_bounds(scene: &PaintScene, item: &PaintSceneItem) -> PaintSceneBo
         }
         PaintPrimitive::Image(image) => (image_local_bounds(image), item.local_to_surface()),
         PaintPrimitive::ShapedTextRun(run) => {
-            let bounds = scene
-                .shaped_text_resource(run.resource_ref())
-                .map_or(PaintSceneBounds::Unbounded, |resource| {
-                    match resource.logical_ink_bounds() {
-                        TextInkBounds::Empty => PaintSceneBounds::Empty,
-                        TextInkBounds::Finite(rect) => PaintSceneBounds::Finite(rect),
-                        TextInkBounds::Unbounded => PaintSceneBounds::Unbounded,
-                    }
-                });
+            let bounds = scene.shaped_text_resource(run.resource_ref()).map_or(
+                PaintSceneBounds::Unbounded,
+                |resource| match resource.logical_ink_bounds() {
+                    TextInkBounds::Empty => PaintSceneBounds::Empty,
+                    TextInkBounds::Finite(rect) => PaintSceneBounds::Finite(rect),
+                    TextInkBounds::Unbounded => PaintSceneBounds::Unbounded,
+                },
+            );
             let Ok(origin) = LogicalTransform::translation(run.origin().x(), run.origin().y())
             else {
                 return PaintSceneBounds::Unbounded;
@@ -86,6 +85,7 @@ fn derive_item_bounds(scene: &PaintScene, item: &PaintSceneItem) -> PaintSceneBo
             };
             (bounds, transform)
         }
+        _ => (PaintSceneBounds::Unbounded, item.local_to_surface()),
     };
 
     let mut bounds = transform_bounds(local_bounds, local_to_surface);
@@ -122,10 +122,11 @@ fn stroke_shape_bounds(shape: &SceneShape, style: StrokeStyle) -> PaintSceneBoun
     }
 
     let centerline = match shape {
-        SceneShape::Rect(rect)
-        | SceneShape::RoundedRect { rect, .. }
-        | SceneShape::Ellipse(rect) => {
+        SceneShape::Rect(rect) | SceneShape::RoundedRect { rect, .. } => *rect,
+        SceneShape::Ellipse(rect) => {
             if rect.width() == 0.0 || rect.height() == 0.0 {
+                // ADR 0011 makes zero-extent ellipse fill/hit coverage empty and does not
+                // define a degenerate ellipse boundary for centered stroke coverage.
                 return PaintSceneBounds::Empty;
             }
             *rect
@@ -138,13 +139,17 @@ fn stroke_shape_bounds(shape: &SceneShape, style: StrokeStyle) -> PaintSceneBoun
         }
     };
 
-    let margin = if style.join() == StrokeJoin::Miter {
+    let join_margin = if style.join() == StrokeJoin::Miter {
         f64::from(width) * f64::from(style.miter_limit())
     } else {
         f64::from(width) * 0.5
     };
-    expand_rect(centerline, margin)
-        .map_or(PaintSceneBounds::Unbounded, PaintSceneBounds::Finite)
+    let cap_margin = match style.cap() {
+        StrokeCap::Square => f64::from(width) * 0.5 * core::f64::consts::SQRT_2,
+        StrokeCap::Butt | StrokeCap::Round => f64::from(width) * 0.5,
+    };
+    let margin = join_margin.max(cap_margin);
+    expand_rect(centerline, margin).map_or(PaintSceneBounds::Unbounded, PaintSceneBounds::Finite)
 }
 
 fn image_local_bounds(image: &ImagePrimitive) -> PaintSceneBounds {
@@ -258,9 +263,7 @@ fn rect_edges(rect: LogicalRect) -> (f64, f64, f64, f64) {
 }
 
 fn logical_rect_from_edges(min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Option<LogicalRect> {
-    if ![min_x, min_y, max_x, max_y]
-        .into_iter()
-        .all(f64::is_finite)
+    if ![min_x, min_y, max_x, max_y].into_iter().all(f64::is_finite)
         || max_x < min_x
         || max_y < min_y
     {
@@ -306,12 +309,13 @@ mod tests {
     use runenui_core::{
         Brush, Color, ImageIntrinsicSize, ImagePrimitive, LogicalLength, LogicalPoint, LogicalRect,
         LogicalTransform, PaintPrimitive, PathFillRule, PathVerb, ResourceKind, ResourceRef,
-        SceneLayer, SceneOpacity, ScenePath, SceneShape, ShapedTextRunPrimitive, StrokeStyle,
+        SceneLayer, SceneOpacity, ScenePath, SceneShape, ShapedTextRunPrimitive, StrokeCap,
+        StrokeJoin, StrokeStyle,
     };
 
     use crate::scene::{PaintSceneComposition, PaintSceneItem, SceneClip};
 
-    use super::{PaintScene, PaintSceneBounds};
+    use super::{PaintScene, PaintSceneBounds, intersect_bounds};
 
     fn rect(x: f32, y: f32, width: f32, height: f32) -> LogicalRect {
         LogicalRect::try_new(x, y, width, height)
@@ -388,12 +392,8 @@ mod tests {
     fn segment_bearing_zero_area_path_keeps_finite_boundary_bound() {
         let path = ScenePath::new(
             vec![
-                PathVerb::MoveTo(
-                    LogicalPoint::new(2.0, 3.0).unwrap_or_else(|_| unreachable!()),
-                ),
-                PathVerb::LineTo(
-                    LogicalPoint::new(12.0, 3.0).unwrap_or_else(|_| unreachable!()),
-                ),
+                PathVerb::MoveTo(LogicalPoint::new(2.0, 3.0).unwrap_or_else(|_| unreachable!())),
+                PathVerb::LineTo(LogicalPoint::new(12.0, 3.0).unwrap_or_else(|_| unreachable!())),
             ],
             PathFillRule::NonZero,
         )
@@ -416,12 +416,8 @@ mod tests {
     fn stroke_bound_conservatively_expands_centerline_geometry() {
         let path = ScenePath::new(
             vec![
-                PathVerb::MoveTo(
-                    LogicalPoint::new(0.0, 0.0).unwrap_or_else(|_| unreachable!()),
-                ),
-                PathVerb::LineTo(
-                    LogicalPoint::new(10.0, 0.0).unwrap_or_else(|_| unreachable!()),
-                ),
+                PathVerb::MoveTo(LogicalPoint::new(0.0, 0.0).unwrap_or_else(|_| unreachable!())),
+                PathVerb::LineTo(LogicalPoint::new(10.0, 0.0).unwrap_or_else(|_| unreachable!())),
             ],
             PathFillRule::NonZero,
         )
@@ -430,15 +426,13 @@ mod tests {
             PaintPrimitive::Stroke {
                 shape: SceneShape::path(path),
                 brush: Brush::solid(Color::BLACK),
-                style: StrokeStyle::new(
-                    LogicalLength::new(2.0).unwrap_or_else(|_| unreachable!()),
-                ),
+                style: StrokeStyle::new(LogicalLength::new(2.0).unwrap_or_else(|_| unreachable!())),
             },
             LogicalTransform::IDENTITY,
             Vec::new(),
         );
         let Some(PaintSceneBounds::Finite(bounds)) = scene(vec![item]).item_bounds(0) else {
-            panic!("ordinary finite stroke must have finite conservative bounds");
+            unreachable!("ordinary finite stroke must have finite conservative bounds");
         };
         assert!(bounds.x() <= -1.0);
         assert!(bounds.y() <= -1.0);
@@ -447,10 +441,157 @@ mod tests {
     }
 
     #[test]
+    fn square_cap_bounds_diagonal_open_segment_without_underreporting() {
+        let path = ScenePath::new(
+            vec![
+                PathVerb::MoveTo(LogicalPoint::new(0.0, 0.0).unwrap_or_else(|_| unreachable!())),
+                PathVerb::LineTo(LogicalPoint::new(10.0, 10.0).unwrap_or_else(|_| unreachable!())),
+            ],
+            PathFillRule::NonZero,
+        )
+        .unwrap_or_else(|_| unreachable!("test path is valid"));
+        let item = scene_item(
+            PaintPrimitive::Stroke {
+                shape: SceneShape::path(path),
+                brush: Brush::solid(Color::BLACK),
+                style: StrokeStyle::new(LogicalLength::new(2.0).unwrap_or_else(|_| unreachable!()))
+                    .with_cap(StrokeCap::Square)
+                    .with_join(StrokeJoin::Bevel),
+            },
+            LogicalTransform::IDENTITY,
+            Vec::new(),
+        );
+        let Some(PaintSceneBounds::Finite(bounds)) = scene(vec![item]).item_bounds(0) else {
+            unreachable!("diagonal square-capped stroke must have finite bounds");
+        };
+        let square_cap_extent = 2.0_f32.sqrt();
+        assert!(bounds.x() <= -square_cap_extent);
+        assert!(bounds.y() <= -square_cap_extent);
+        assert!(bounds.max_x() >= 10.0 + square_cap_extent);
+        assert!(bounds.max_y() >= 10.0 + square_cap_extent);
+    }
+
+    #[test]
+    fn positive_stroke_keeps_degenerate_rect_boundary_coverage() {
+        let item = scene_item(
+            PaintPrimitive::Stroke {
+                shape: SceneShape::rect(rect(4.0, 5.0, 0.0, 10.0)),
+                brush: Brush::solid(Color::BLACK),
+                style: StrokeStyle::new(LogicalLength::new(2.0).unwrap_or_else(|_| unreachable!())),
+            },
+            LogicalTransform::IDENTITY,
+            Vec::new(),
+        );
+        let Some(PaintSceneBounds::Finite(bounds)) = scene(vec![item]).item_bounds(0) else {
+            unreachable!("degenerate rectangle stroke must retain its finite boundary");
+        };
+        assert!(bounds.x() <= 3.0);
+        assert!(bounds.max_x() >= 5.0);
+        assert!(bounds.y() <= 4.0);
+        assert!(bounds.max_y() >= 16.0);
+    }
+
+    #[test]
+    fn zero_width_stroke_is_empty_and_never_a_hairline() {
+        let item = scene_item(
+            PaintPrimitive::Stroke {
+                shape: SceneShape::rect(rect(0.0, 0.0, 10.0, 10.0)),
+                brush: Brush::solid(Color::BLACK),
+                style: StrokeStyle::new(LogicalLength::new(0.0).unwrap_or_else(|_| unreachable!()))
+                    .with_cap(StrokeCap::Square),
+            },
+            LogicalTransform::IDENTITY,
+            Vec::new(),
+        );
+        assert_eq!(
+            scene(vec![item]).item_bounds(0),
+            Some(PaintSceneBounds::Empty)
+        );
+    }
+
+    #[test]
+    fn zero_extent_ellipse_stroke_remains_empty_under_ellipse_authority() {
+        let item = scene_item(
+            PaintPrimitive::Stroke {
+                shape: SceneShape::ellipse(rect(4.0, 5.0, 0.0, 10.0)),
+                brush: Brush::solid(Color::BLACK),
+                style: StrokeStyle::new(LogicalLength::new(2.0).unwrap_or_else(|_| unreachable!())),
+            },
+            LogicalTransform::IDENTITY,
+            Vec::new(),
+        );
+        assert_eq!(
+            scene(vec![item]).item_bounds(0),
+            Some(PaintSceneBounds::Empty)
+        );
+    }
+
+    #[test]
+    fn bound_intersection_preserves_empty_top_and_zero_extent_algebra() {
+        let finite = PaintSceneBounds::Finite(rect(2.0, 3.0, 4.0, 5.0));
+        assert_eq!(
+            intersect_bounds(PaintSceneBounds::Empty, finite),
+            PaintSceneBounds::Empty
+        );
+        assert_eq!(
+            intersect_bounds(PaintSceneBounds::Unbounded, finite),
+            finite
+        );
+        assert_eq!(
+            intersect_bounds(PaintSceneBounds::Unbounded, PaintSceneBounds::Unbounded),
+            PaintSceneBounds::Unbounded
+        );
+        assert_eq!(
+            intersect_bounds(
+                PaintSceneBounds::Finite(rect(0.0, 0.0, 2.0, 2.0)),
+                PaintSceneBounds::Finite(rect(3.0, 0.0, 2.0, 2.0)),
+            ),
+            PaintSceneBounds::Empty
+        );
+        assert_eq!(
+            intersect_bounds(
+                PaintSceneBounds::Finite(rect(0.0, 0.0, 10.0, 10.0)),
+                PaintSceneBounds::Finite(rect(10.0, 2.0, 0.0, 6.0)),
+            ),
+            PaintSceneBounds::Finite(rect(10.0, 2.0, 0.0, 6.0))
+        );
+    }
+
+    #[test]
+    fn unbounded_coverage_is_narrowed_by_finite_clip() {
+        let clipped = intersect_bounds(
+            PaintSceneBounds::Unbounded,
+            PaintSceneBounds::Finite(rect(3.0, 4.0, 5.0, 6.0)),
+        );
+        assert_eq!(clipped, PaintSceneBounds::Finite(rect(3.0, 4.0, 5.0, 6.0)));
+    }
+
+    #[test]
+    fn singular_clip_excludes_item_coverage() {
+        let singular = LogicalTransform::try_new(0.0, 0.0, 0.0, 0.0, 1.0, 2.0)
+            .unwrap_or_else(|_| unreachable!("singular transform is still finite"));
+        let item = scene_item(
+            PaintPrimitive::Fill {
+                shape: SceneShape::rect(rect(0.0, 0.0, 10.0, 10.0)),
+                brush: Brush::solid(Color::BLACK),
+            },
+            LogicalTransform::IDENTITY,
+            vec![SceneClip::new(
+                SceneShape::rect(rect(0.0, 0.0, 10.0, 10.0)),
+                singular,
+            )],
+        );
+        assert_eq!(
+            scene(vec![item]).item_bounds(0),
+            Some(PaintSceneBounds::Empty)
+        );
+    }
+
+    #[test]
     fn resolved_image_uses_union_of_runtime_destination_patches() {
         let resource = ResourceRef::new(ResourceKind::Image);
         let intrinsic = ImageIntrinsicSize::new(100, 100)
-            .unwrap_or_else(|_| unreachable!("test intrinsic extent is valid"));
+            .unwrap_or_else(|| unreachable!("test intrinsic extent is valid"));
         let image = ImagePrimitive::__runtime_resolved(
             resource,
             intrinsic,
@@ -520,6 +661,24 @@ mod tests {
         assert_eq!(
             scene(vec![item]).item_bounds(0),
             Some(PaintSceneBounds::Finite(rect(10.0, 2.0, 0.0, 6.0)))
+        );
+    }
+
+    #[test]
+    fn unrepresentable_item_transform_is_unbounded_without_untransformed_fallback() {
+        let transform = LogicalTransform::try_new(f32::MAX, 0.0, 0.0, 1.0, 0.0, 0.0)
+            .unwrap_or_else(|_| unreachable!("extreme transform remains finite"));
+        let item = scene_item(
+            PaintPrimitive::Fill {
+                shape: SceneShape::rect(rect(0.0, 0.0, 2.0, 1.0)),
+                brush: Brush::solid(Color::BLACK),
+            },
+            transform,
+            Vec::new(),
+        );
+        assert_eq!(
+            scene(vec![item]).item_bounds(0),
+            Some(PaintSceneBounds::Unbounded)
         );
     }
 }

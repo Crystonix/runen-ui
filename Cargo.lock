@@ -1932,6 +1932,7 @@ dependencies = [
  "fontique",
  "parley",
  "runenui_core",
+ "skrifa",
 ]
 
 [[package]]
