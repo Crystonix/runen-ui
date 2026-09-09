@@ -134,20 +134,20 @@ impl PaintContributionGroup {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct NormalizedPaintGroup {
-    pub(crate) parent: Option<usize>,
-    pub(crate) clips: Vec<ContributionClip>,
-    pub(crate) opacity: SceneOpacity,
-    pub(crate) shadows: Vec<DropShadow>,
+pub(super) struct NormalizedPaintGroup {
+    pub(super) parent: Option<usize>,
+    pub(super) clips: Vec<ContributionClip>,
+    pub(super) opacity: SceneOpacity,
+    pub(super) shadows: Vec<DropShadow>,
 }
 
-pub(crate) struct NormalizedPaintContribution {
-    pub(crate) items: Vec<PaintContributionItem>,
-    pub(crate) groups: Vec<NormalizedPaintGroup>,
-    pub(crate) item_groups: Vec<Option<usize>>,
+pub(super) struct NormalizedPaintContribution {
+    pub(super) items: Vec<PaintContributionItem>,
+    pub(super) groups: Vec<NormalizedPaintGroup>,
+    pub(super) item_groups: Vec<Option<usize>>,
 }
 
-pub(crate) fn normalize_entries(
+pub(super) fn normalize_entries(
     entries: Vec<PaintContributionEntry>,
 ) -> NormalizedPaintContribution {
     let mut normalized = NormalizedPaintContribution {
