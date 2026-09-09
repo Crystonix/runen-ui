@@ -49,7 +49,8 @@ This ADR **narrowly amends ADR 0010** only for:
 2. deterministic group insertion/ordered membership;
 3. the mounted visual-subtree scope of node opacity and ordinary node shadows; and
 4. the exact runtime-derived node-effect isolation predicate, including its interaction
-   with active opacity/shadow transitions and explicit timelines.
+   with effective opacity/shadow transitions, explicit timelines, and preference
+   suppression.
 
 For those subjects, ADR 0012 controls. ADR 0011 continues to control path-fill,
 stroke-closure, ellipse, and signed-shadow-spread/effect-bound semantics. Every other
@@ -156,26 +157,35 @@ whether its opacity/effects are identity-valued. Structurally empty groups retai
 omission rule above.
 
 For M9B motion, group existence is derived from the staged candidate, never from a
-renderer frame. The two accepted motion sources use exact source-specific requirements:
+renderer frame. Only the motion source that remains effective for the property after
+mandatory preference and suppression policy may contribute a motion-specific group
+requirement. A suppressed transition/timeline contributes neither a hidden terminal
+requirement nor a hidden keyframe-specification requirement; group existence then
+follows the governed effective property fact and any surviving effective motion.
 
-- for a live style transition of node opacity or shadows, the group remains present
-  when either the current sampled effective value requires isolation under the static
-  predicate above or the transition's terminal target requires isolation;
-- for a live explicit opacity/shadow timeline, the group remains present when either
-  the current sampled effective value requires isolation or any accepted keyframe
-  value in that live timeline specification requires isolation.
+The two accepted effective motion sources use exact source-specific requirements:
+
+- for a live unsuppressed style transition of node opacity or shadows, the group
+  remains present when either the current sampled effective value requires isolation
+  under the static predicate above or the transition's terminal target requires
+  isolation;
+- for a live unsuppressed explicit opacity/shadow timeline, the group remains present
+  when either the current sampled effective value requires isolation or any accepted
+  keyframe value in that live timeline specification requires isolation.
 
 The explicit-timeline rule intentionally prevents a stacking context from appearing
 and disappearing merely because one intermediate keyframe or repeat boundary happens
 to equal the identity value. An identity-only explicit timeline does not create a
-node-effect group by itself.
+node-effect group by itself. Preference-suppressed motion likewise cannot create an
+otherwise invisible stacking context around a governed identity value.
 
 A candidate that atomically completes motion evaluates this predicate against the
 post-completion motion state: the completed transition/timeline does not keep an
-otherwise identity node isolated. Replacement uses the surviving replacement motion
-source and its terminal target or keyframe specification after the accepted
-cancellation/replacement ordering. Group creation/removal, the sampled property
-product, and motion lifetime state commit atomically with the staged publication.
+otherwise identity node isolated. Replacement uses the surviving effective
+replacement motion source and its terminal target or keyframe specification after the
+accepted cancellation/replacement and preference-precedence decisions. Group
+creation/removal, the sampled property product, preference-governed motion ownership,
+and motion lifetime state commit atomically with the staged publication.
 
 ### Explicit owner-local groups remain locally owned
 
@@ -216,6 +226,8 @@ semantic geometry.
   membership, without a new public group-layer vocabulary.
 - Exact node-effect group existence is framework behavior, so renderer/cache
   optimizations cannot add or remove stacking contexts.
+- Mandatory preference suppression cannot be bypassed by hidden group lifetime from a
+  motion source that is not currently effective.
 - Renderer implementations receive already-decided group structure/order and may use
   any disposable offscreen/cache strategy that realizes the same semantics.
 - Node opacity/shadows can be implemented once over composed subtree coverage instead
@@ -274,8 +286,9 @@ authority.
 
 M9B proof must preserve the same ordering semantics across motion. `M9MOTION-06` owns
 sample/transition-target/timeline-spec-driven group recomposition and invalidation
-without relayout, while `M9MOTION-09` owns atomic start/replacement/completion
-correlation between live motion source/specification, group existence, and the staged
+without relayout, `M9MOTION-07` owns preference/suppression precedence over that group
+requirement, and `M9MOTION-09` owns atomic start/replacement/completion correlation
+between effective live motion source/specification, group existence, and the staged
 publication.
 
 No row is promoted by accepting this architecture amendment.
