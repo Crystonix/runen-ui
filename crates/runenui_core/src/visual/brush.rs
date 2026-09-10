@@ -224,8 +224,8 @@ impl LinearGradient {
         let point_x = f64::from(point.x()) - start_x;
         let point_y = f64::from(point.y()) - start_y;
         let denominator = direction_x * direction_x + direction_y * direction_y;
-        let coordinate = ((point_x * direction_x + point_y * direction_y) / denominator)
-            .clamp(0.0, 1.0);
+        let coordinate =
+            ((point_x * direction_x + point_y * direction_y) / denominator).clamp(0.0, 1.0);
         sample_gradient_stops(self.stops.as_slice(), coordinate)
     }
 }
@@ -336,9 +336,7 @@ fn sample_gradient_stops(stops: &[GradientStop], coordinate: f64) -> Color {
         }
         if coordinate == stop_offset {
             let mut first_equal = index;
-            while first_equal > 0
-                && stops[first_equal - 1].offset().get() == stop.offset().get()
-            {
+            while first_equal > 0 && stops[first_equal - 1].offset().get() == stop.offset().get() {
                 first_equal -= 1;
             }
             return stops[first_equal].color();
@@ -469,7 +467,10 @@ mod tests {
 
     #[test]
     fn gradient_sampling_uses_linear_srgb_not_straight_srgb() {
-        assert_eq!(stops().sample(UnitInterval::HALF), Color::rgb(188, 188, 188));
+        assert_eq!(
+            stops().sample(UnitInterval::HALF),
+            Color::rgb(188, 188, 188)
+        );
     }
 
     #[test]
@@ -507,8 +508,8 @@ mod tests {
 
     #[test]
     fn endpoint_extension_and_primitive_local_geometry_are_authoritative() {
-        let quarter = UnitInterval::new(0.25)
-            .unwrap_or_else(|_| unreachable!("quarter coordinate is valid"));
+        let quarter =
+            UnitInterval::new(0.25).unwrap_or_else(|_| unreachable!("quarter coordinate is valid"));
         let three_quarters = UnitInterval::new(0.75)
             .unwrap_or_else(|_| unreachable!("three-quarter coordinate is valid"));
         let stops = GradientStops::new(vec![
