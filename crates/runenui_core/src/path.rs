@@ -170,11 +170,11 @@ fn validate_verbs(verbs: &[PathVerb]) -> Result<(), ScenePathError> {
     Ok(())
 }
 
-pub(super) fn line_is_point_degenerate(from: LogicalPoint, to: LogicalPoint) -> bool {
+pub fn line_is_point_degenerate(from: LogicalPoint, to: LogicalPoint) -> bool {
     from == to
 }
 
-pub(super) fn quadratic_is_point_degenerate(
+pub fn quadratic_is_point_degenerate(
     from: LogicalPoint,
     control: LogicalPoint,
     to: LogicalPoint,
@@ -182,7 +182,7 @@ pub(super) fn quadratic_is_point_degenerate(
     from == control && control == to
 }
 
-pub(super) fn cubic_is_point_degenerate(
+pub fn cubic_is_point_degenerate(
     from: LogicalPoint,
     control1: LogicalPoint,
     control2: LogicalPoint,
