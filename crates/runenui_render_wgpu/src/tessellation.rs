@@ -1,0 +1,690 @@
+//! Disposable CPU tessellation for the later renderer realization checkpoint.
+//!
+//! The module deliberately stops at validated CPU geometry. Lyon paths and
+//! tessellator state are temporary implementation details; they do not become
+//! scene, publication, hit, bounds, cache, or GPU authority.
+
+use core::{error::Error, fmt};
+
+use lyon_tessellation::{
+    FillOptions, FillRule, FillTessellator, LineCap, LineJoin, StrokeOptions, StrokeTessellator,
+    geom::{Angle, Arc},
+    geometry_builder::{BuffersBuilder, Positions, VertexBuffers},
+    math::{Point, point, vector},
+    path::{NO_ATTRIBUTES, Path, builder::PathBuilder},
+};
+use runenui_core::{
+    LogicalPoint, LogicalRect, PathFillRule, PathVerb, ScenePath, SceneShape, StrokeCap,
+    StrokeJoin, StrokeStyle,
+};
+
+const TESSELLATION_TOLERANCE: f32 = 0.05;
+const HALF_PI: f32 = core::f32::consts::FRAC_PI_2;
+
+/// Failure from the private neutral-to-Lyon realization adapter.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TessellationError {
+    /// An intermediate point or generated vertex was not finite.
+    NonFiniteGeometry,
+    /// Lyon rejected the path or tessellation parameters.
+    Lyon,
+    /// The returned buffers did not satisfy the renderer substrate contract.
+    InvalidGeometry,
+}
+
+impl fmt::Display for TessellationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::NonFiniteGeometry => "tessellation produced non-finite geometry",
+            Self::Lyon => "Lyon rejected the disposable tessellation input",
+            Self::InvalidGeometry => "tessellation produced invalid indexed geometry",
+        })
+    }
+}
+
+impl Error for TessellationError {}
+
+/// Disposable indexed CPU geometry. It is intentionally not a renderer cache
+/// or a logical scene representation.
+#[derive(Clone, Debug, PartialEq)]
+struct TessellatedGeometry {
+    positions: Vec<[f32; 2]>,
+    indices: Vec<u32>,
+}
+
+impl TessellatedGeometry {
+    const fn empty() -> Self {
+        Self {
+            positions: Vec::new(),
+            indices: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ContourMode {
+    Fill,
+    Stroke,
+}
+
+fn tessellate_fill(shape: &SceneShape) -> Result<TessellatedGeometry, TessellationError> {
+    let Some(path) = disposable_path(shape, ContourMode::Fill)? else {
+        return Ok(TessellatedGeometry::empty());
+    };
+
+    let fill_rule = match shape {
+        SceneShape::Path(path) => path_fill_rule(path.fill_rule()),
+        SceneShape::Rect(_) | SceneShape::RoundedRect { .. } | SceneShape::Ellipse(_) => {
+            FillRule::NonZero
+        }
+    };
+    let options = fill_options(fill_rule);
+    let mut buffers = VertexBuffers::<Point, u32>::new();
+    let mut output = BuffersBuilder::new(&mut buffers, Positions);
+    FillTessellator::new()
+        .tessellate_path(&path, &options, &mut output)
+        .map_err(|_| TessellationError::Lyon)?;
+    validate_buffers(buffers)
+}
+
+fn tessellate_stroke(
+    shape: &SceneShape,
+    style: StrokeStyle,
+) -> Result<TessellatedGeometry, TessellationError> {
+    if style.width().get() == 0.0 {
+        return Ok(TessellatedGeometry::empty());
+    }
+    let Some(path) = disposable_path(shape, ContourMode::Stroke)? else {
+        return Ok(TessellatedGeometry::empty());
+    };
+
+    let options = stroke_options(style);
+    let mut buffers = VertexBuffers::<Point, u32>::new();
+    let mut output = BuffersBuilder::new(&mut buffers, Positions);
+    StrokeTessellator::new()
+        .tessellate_path(&path, &options, &mut output)
+        .map_err(|_| TessellationError::Lyon)?;
+    validate_buffers(buffers)
+}
+
+fn fill_options(fill_rule: FillRule) -> FillOptions {
+    FillOptions::tolerance(TESSELLATION_TOLERANCE)
+        .with_fill_rule(fill_rule)
+        .with_sweep_orientation(lyon_tessellation::Orientation::Vertical)
+        .with_intersections(true)
+}
+
+fn stroke_options(style: StrokeStyle) -> StrokeOptions {
+    StrokeOptions::tolerance(TESSELLATION_TOLERANCE)
+        .with_start_cap(stroke_cap(style.cap()))
+        .with_end_cap(stroke_cap(style.cap()))
+        .with_line_join(stroke_join(style.join()))
+        .with_line_width(style.width().get())
+        .with_miter_limit(style.miter_limit())
+}
+
+const fn path_fill_rule(rule: PathFillRule) -> FillRule {
+    match rule {
+        PathFillRule::NonZero => FillRule::NonZero,
+        PathFillRule::EvenOdd => FillRule::EvenOdd,
+    }
+}
+
+const fn stroke_cap(cap: StrokeCap) -> LineCap {
+    match cap {
+        StrokeCap::Butt => LineCap::Butt,
+        StrokeCap::Round => LineCap::Round,
+        StrokeCap::Square => LineCap::Square,
+    }
+}
+
+const fn stroke_join(join: StrokeJoin) -> LineJoin {
+    match join {
+        StrokeJoin::Miter => LineJoin::Miter,
+        StrokeJoin::Bevel => LineJoin::Bevel,
+        StrokeJoin::Round => LineJoin::Round,
+    }
+}
+
+fn disposable_path(
+    shape: &SceneShape,
+    mode: ContourMode,
+) -> Result<Option<Path>, TessellationError> {
+    match shape {
+        SceneShape::Rect(rect) => {
+            if matches!(mode, ContourMode::Fill) && is_degenerate(*rect) {
+                Ok(None)
+            } else {
+                build_rect_path(*rect).map(Some)
+            }
+        }
+        SceneShape::RoundedRect { rect, .. } => {
+            if matches!(mode, ContourMode::Fill) && is_degenerate(*rect) {
+                Ok(None)
+            } else {
+                build_rounded_rect_path(shape, *rect).map(Some)
+            }
+        }
+        SceneShape::Ellipse(rect) => {
+            if is_degenerate(*rect) {
+                Ok(None)
+            } else {
+                build_ellipse_path(*rect).map(Some)
+            }
+        }
+        SceneShape::Path(path) => {
+            if path.is_coverage_empty() {
+                Ok(None)
+            } else {
+                build_scene_path(path, mode).map(Some)
+            }
+        }
+    }
+}
+
+fn build_rect_path(rect: LogicalRect) -> Result<Path, TessellationError> {
+    let left = rect.x();
+    let top = rect.y();
+    let right = rect.max_x();
+    let bottom = rect.max_y();
+    let mut builder = Path::builder();
+    builder.begin(finite_point(left, top)?);
+    builder.line_to(finite_point(right, top)?);
+    builder.line_to(finite_point(right, bottom)?);
+    builder.line_to(finite_point(left, bottom)?);
+    builder.end(true);
+    Ok(builder.build())
+}
+
+fn build_rounded_rect_path(
+    shape: &SceneShape,
+    rect: LogicalRect,
+) -> Result<Path, TessellationError> {
+    let radius = shape
+        .normalized_radius()
+        .ok_or(TessellationError::NonFiniteGeometry)?;
+    let left = rect.x();
+    let top = rect.y();
+    let right = rect.max_x();
+    let bottom = rect.max_y();
+    let top_left = radius.top_left().get();
+    let top_right = radius.top_right().get();
+    let bottom_right = radius.bottom_right().get();
+    let bottom_left = radius.bottom_left().get();
+
+    let mut builder = Path::builder();
+    builder.begin(finite_point(left + top_left, top)?);
+    builder.line_to(finite_point(right - top_right, top)?);
+    append_arc(
+        &mut builder,
+        point(right - top_right, top + top_right),
+        vector(top_right, top_right),
+        -HALF_PI,
+        HALF_PI,
+    )?;
+    builder.line_to(finite_point(right, bottom - bottom_right)?);
+    append_arc(
+        &mut builder,
+        point(right - bottom_right, bottom - bottom_right),
+        vector(bottom_right, bottom_right),
+        0.0,
+        HALF_PI,
+    )?;
+    builder.line_to(finite_point(left + bottom_left, bottom)?);
+    append_arc(
+        &mut builder,
+        point(left + bottom_left, bottom - bottom_left),
+        vector(bottom_left, bottom_left),
+        HALF_PI,
+        HALF_PI,
+    )?;
+    builder.line_to(finite_point(left, top + top_left)?);
+    append_arc(
+        &mut builder,
+        point(left + top_left, top + top_left),
+        vector(top_left, top_left),
+        core::f32::consts::PI,
+        HALF_PI,
+    )?;
+    builder.end(true);
+    Ok(builder.build())
+}
+
+fn build_ellipse_path(rect: LogicalRect) -> Result<Path, TessellationError> {
+    let center = point(
+        rect.width().mul_add(0.5, rect.x()),
+        rect.height().mul_add(0.5, rect.y()),
+    );
+    let radii = vector(rect.width() * 0.5, rect.height() * 0.5);
+    let mut builder = Path::builder();
+    let start = point(center.x + radii.x, center.y);
+    builder.begin(finite_point(start.x, start.y)?);
+    for start_angle in [0.0, HALF_PI, core::f32::consts::PI, 3.0 * HALF_PI] {
+        append_arc(&mut builder, center, radii, start_angle, HALF_PI)?;
+    }
+    builder.end(true);
+    Ok(builder.build())
+}
+
+fn build_scene_path(scene_path: &ScenePath, mode: ContourMode) -> Result<Path, TessellationError> {
+    let mut builder = Path::builder();
+    let mut contour_start = None;
+    let mut active = false;
+
+    for verb in scene_path.verbs() {
+        match *verb {
+            PathVerb::MoveTo(to) => {
+                if active {
+                    builder.end(matches!(mode, ContourMode::Fill));
+                }
+                contour_start = Some(finite_point_from_logical(to)?);
+                active = false;
+            }
+            PathVerb::LineTo(to) => {
+                if !active {
+                    builder.begin(contour_start.ok_or(TessellationError::Lyon)?);
+                    active = true;
+                }
+                builder.line_to(finite_point_from_logical(to)?);
+            }
+            PathVerb::QuadraticTo { control, to } => {
+                if !active {
+                    builder.begin(contour_start.ok_or(TessellationError::Lyon)?);
+                    active = true;
+                }
+                builder.quadratic_bezier_to(
+                    finite_point_from_logical(control)?,
+                    finite_point_from_logical(to)?,
+                );
+            }
+            PathVerb::CubicTo {
+                control1,
+                control2,
+                to,
+            } => {
+                if !active {
+                    builder.begin(contour_start.ok_or(TessellationError::Lyon)?);
+                    active = true;
+                }
+                builder.cubic_bezier_to(
+                    finite_point_from_logical(control1)?,
+                    finite_point_from_logical(control2)?,
+                    finite_point_from_logical(to)?,
+                );
+            }
+            PathVerb::Close => {
+                if !active {
+                    return Err(TessellationError::Lyon);
+                }
+                builder.end(true);
+                active = false;
+            }
+        }
+    }
+
+    if active {
+        builder.end(matches!(mode, ContourMode::Fill));
+    }
+    Ok(builder.build())
+}
+
+fn append_arc(
+    builder: &mut impl PathBuilder,
+    center: Point,
+    radii: lyon_tessellation::math::Vector,
+    start_angle: f32,
+    sweep_angle: f32,
+) -> Result<(), TessellationError> {
+    if ![
+        center.x,
+        center.y,
+        radii.x,
+        radii.y,
+        start_angle,
+        sweep_angle,
+    ]
+    .into_iter()
+    .all(f32::is_finite)
+    {
+        return Err(TessellationError::NonFiniteGeometry);
+    }
+    if radii.x == 0.0 || radii.y == 0.0 {
+        return Ok(());
+    }
+    let arc = Arc {
+        center,
+        radii,
+        start_angle: Angle::radians(start_angle),
+        sweep_angle: Angle::radians(sweep_angle),
+        x_rotation: Angle::zero(),
+    };
+    let mut invalid = false;
+    arc.for_each_cubic_bezier(&mut |curve| {
+        if [
+            curve.ctrl1.x,
+            curve.ctrl1.y,
+            curve.ctrl2.x,
+            curve.ctrl2.y,
+            curve.to.x,
+            curve.to.y,
+        ]
+        .into_iter()
+        .all(f32::is_finite)
+        {
+            builder.cubic_bezier_to(curve.ctrl1, curve.ctrl2, curve.to, NO_ATTRIBUTES);
+        } else {
+            invalid = true;
+        }
+    });
+    if invalid {
+        Err(TessellationError::NonFiniteGeometry)
+    } else {
+        Ok(())
+    }
+}
+
+fn is_degenerate(rect: LogicalRect) -> bool {
+    rect.width() == 0.0 || rect.height() == 0.0
+}
+
+fn finite_point(x: f32, y: f32) -> Result<Point, TessellationError> {
+    if x.is_finite() && y.is_finite() {
+        Ok(point(x, y))
+    } else {
+        Err(TessellationError::NonFiniteGeometry)
+    }
+}
+
+fn finite_point_from_logical(point: LogicalPoint) -> Result<Point, TessellationError> {
+    finite_point(point.x(), point.y())
+}
+
+fn validate_buffers(
+    buffers: VertexBuffers<Point, u32>,
+) -> Result<TessellatedGeometry, TessellationError> {
+    if !buffers.indices.len().is_multiple_of(3) {
+        return Err(TessellationError::InvalidGeometry);
+    }
+    let positions = buffers
+        .vertices
+        .into_iter()
+        .map(|position| {
+            if position.x.is_finite() && position.y.is_finite() {
+                Ok([position.x, position.y])
+            } else {
+                Err(TessellationError::NonFiniteGeometry)
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if buffers
+        .indices
+        .iter()
+        .any(|index| usize::try_from(*index).map_or(true, |index| index >= positions.len()))
+    {
+        return Err(TessellationError::InvalidGeometry);
+    }
+    Ok(TessellatedGeometry {
+        positions,
+        indices: buffers.indices,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use lyon_tessellation::path::Event;
+    use runenui_core::{
+        LogicalLength, LogicalPoint, LogicalRect, PathFillRule, PathVerb, Radius, ScenePath,
+        SceneShape, StrokeCap, StrokeJoin, StrokeStyle,
+    };
+
+    use super::{
+        ContourMode, TessellatedGeometry, build_scene_path, fill_options, path_fill_rule,
+        stroke_cap, stroke_join, stroke_options, tessellate_fill, tessellate_stroke,
+    };
+
+    fn rect(width: f32, height: f32) -> LogicalRect {
+        LogicalRect::try_new(0.0, 0.0, width, height)
+            .unwrap_or_else(|_| unreachable!("test rectangle is valid"))
+    }
+
+    fn length(value: f32) -> LogicalLength {
+        LogicalLength::new(value).unwrap_or_else(|_| unreachable!("test length is valid"))
+    }
+
+    fn point(x: f32, y: f32) -> LogicalPoint {
+        LogicalPoint::new(x, y).unwrap_or_else(|_| unreachable!("test point is valid"))
+    }
+
+    fn path(verbs: Vec<PathVerb>, fill_rule: PathFillRule) -> SceneShape {
+        SceneShape::path(
+            ScenePath::new(verbs, fill_rule)
+                .unwrap_or_else(|_| unreachable!("test path is structurally valid")),
+        )
+    }
+
+    fn assert_valid_geometry(geometry: &TessellatedGeometry) {
+        assert_eq!(geometry.indices.len() % 3, 0);
+        assert!(
+            geometry
+                .positions
+                .iter()
+                .flatten()
+                .all(|value| value.is_finite())
+        );
+        assert!(geometry.indices.iter().all(|index| {
+            usize::try_from(*index).is_ok_and(|index| index < geometry.positions.len())
+        }));
+    }
+
+    #[test]
+    fn fill_output_is_deterministic_and_valid() {
+        let shape = SceneShape::rect(rect(10.0, 6.0));
+        let first =
+            tessellate_fill(&shape).unwrap_or_else(|_| unreachable!("rect fill tessellates"));
+        let second =
+            tessellate_fill(&shape).unwrap_or_else(|_| unreachable!("rect fill tessellates"));
+        assert_eq!(first, second);
+        assert!(!first.positions.is_empty());
+        assert_valid_geometry(&first);
+    }
+
+    #[test]
+    fn positive_rounded_rect_and_ellipse_fills_are_non_empty() {
+        let rounded = SceneShape::rounded_rect(
+            rect(20.0, 12.0),
+            Radius::new(length(14.0), length(14.0), length(14.0), length(0.0)),
+        );
+        let ellipse = SceneShape::ellipse(rect(20.0, 12.0));
+        let rounded_geometry = tessellate_fill(&rounded)
+            .unwrap_or_else(|_| unreachable!("rounded rectangle fill tessellates"));
+        let ellipse_geometry =
+            tessellate_fill(&ellipse).unwrap_or_else(|_| unreachable!("ellipse fill tessellates"));
+        assert!(!rounded_geometry.positions.is_empty());
+        assert!(!ellipse_geometry.positions.is_empty());
+        assert_valid_geometry(&rounded_geometry);
+        assert_valid_geometry(&ellipse_geometry);
+    }
+
+    #[test]
+    fn zero_extent_ellipse_fill_is_empty() {
+        let shape = SceneShape::ellipse(rect(0.0, 10.0));
+        assert_eq!(
+            tessellate_fill(&shape)
+                .unwrap_or_else(|_| unreachable!("degenerate ellipse is handled")),
+            TessellatedGeometry::empty()
+        );
+    }
+
+    #[test]
+    fn path_with_line_quadratic_and_cubic_tessellates() {
+        let shape = path(
+            vec![
+                PathVerb::MoveTo(point(0.0, 0.0)),
+                PathVerb::LineTo(point(20.0, 0.0)),
+                PathVerb::QuadraticTo {
+                    control: point(25.0, 5.0),
+                    to: point(20.0, 10.0),
+                },
+                PathVerb::CubicTo {
+                    control1: point(15.0, 15.0),
+                    control2: point(5.0, 15.0),
+                    to: point(0.0, 10.0),
+                },
+            ],
+            PathFillRule::NonZero,
+        );
+        let fill =
+            tessellate_fill(&shape).unwrap_or_else(|_| unreachable!("path fill tessellates"));
+        let stroke = tessellate_stroke(&shape, StrokeStyle::new(length(2.0)))
+            .unwrap_or_else(|_| unreachable!("path stroke tessellates"));
+        assert!(!fill.positions.is_empty());
+        assert!(!stroke.positions.is_empty());
+        assert_valid_geometry(&fill);
+        assert_valid_geometry(&stroke);
+    }
+
+    #[test]
+    fn fill_rule_mapping_is_explicit() {
+        assert_eq!(
+            path_fill_rule(PathFillRule::NonZero),
+            lyon_tessellation::FillRule::NonZero
+        );
+        assert_eq!(
+            path_fill_rule(PathFillRule::EvenOdd),
+            lyon_tessellation::FillRule::EvenOdd
+        );
+        assert_eq!(
+            fill_options(lyon_tessellation::FillRule::NonZero).fill_rule,
+            lyon_tessellation::FillRule::NonZero
+        );
+        assert_eq!(
+            fill_options(lyon_tessellation::FillRule::EvenOdd).fill_rule,
+            lyon_tessellation::FillRule::EvenOdd
+        );
+    }
+
+    #[test]
+    fn fill_closes_open_contours_but_stroke_does_not() {
+        let shape = path(
+            vec![
+                PathVerb::MoveTo(point(0.0, 0.0)),
+                PathVerb::LineTo(point(10.0, 0.0)),
+                PathVerb::LineTo(point(10.0, 10.0)),
+            ],
+            PathFillRule::NonZero,
+        );
+        let fill_events = build_scene_path(
+            match &shape {
+                SceneShape::Path(path) => path,
+                _ => unreachable!("test shape is a path"),
+            },
+            ContourMode::Fill,
+        )
+        .unwrap_or_else(|_| unreachable!("fill path converts"))
+        .iter()
+        .collect::<Vec<_>>();
+        let stroke_events = build_scene_path(
+            match &shape {
+                SceneShape::Path(path) => path,
+                _ => unreachable!("test shape is a path"),
+            },
+            ContourMode::Stroke,
+        )
+        .unwrap_or_else(|_| unreachable!("stroke path converts"))
+        .iter()
+        .collect::<Vec<_>>();
+        assert!(matches!(
+            fill_events.last(),
+            Some(Event::End { close: true, .. })
+        ));
+        assert!(matches!(
+            stroke_events.last(),
+            Some(Event::End { close: false, .. })
+        ));
+    }
+
+    #[test]
+    fn authored_close_remains_a_stroke_close() {
+        let shape = path(
+            vec![
+                PathVerb::MoveTo(point(0.0, 0.0)),
+                PathVerb::LineTo(point(10.0, 0.0)),
+                PathVerb::LineTo(point(10.0, 10.0)),
+                PathVerb::Close,
+            ],
+            PathFillRule::NonZero,
+        );
+        let events = build_scene_path(
+            match &shape {
+                SceneShape::Path(path) => path,
+                _ => unreachable!("test shape is a path"),
+            },
+            ContourMode::Stroke,
+        )
+        .unwrap_or_else(|_| unreachable!("authored close converts"))
+        .iter()
+        .collect::<Vec<_>>();
+        assert!(matches!(
+            events.last(),
+            Some(Event::End { close: true, .. })
+        ));
+    }
+
+    #[test]
+    fn stroke_options_map_caps_joins_width_and_miter_limit_explicitly() {
+        let style = StrokeStyle::new(length(3.0))
+            .with_cap(StrokeCap::Square)
+            .with_join(StrokeJoin::Round)
+            .with_miter_limit(2.5)
+            .unwrap_or_else(|_| unreachable!("test miter limit is valid"));
+        let options = stroke_options(style);
+        assert_eq!(options.start_cap, lyon_tessellation::LineCap::Square);
+        assert_eq!(options.end_cap, lyon_tessellation::LineCap::Square);
+        assert_eq!(options.line_join, lyon_tessellation::LineJoin::Round);
+        assert_eq!(options.line_width.to_bits(), 3.0_f32.to_bits());
+        assert_eq!(options.miter_limit.to_bits(), 2.5_f32.to_bits());
+        assert_eq!(
+            options.tolerance.to_bits(),
+            super::TESSELLATION_TOLERANCE.to_bits()
+        );
+        assert_eq!(
+            stroke_cap(StrokeCap::Butt),
+            lyon_tessellation::LineCap::Butt
+        );
+        assert_eq!(
+            stroke_cap(StrokeCap::Round),
+            lyon_tessellation::LineCap::Round
+        );
+        assert_eq!(
+            stroke_join(StrokeJoin::Miter),
+            lyon_tessellation::LineJoin::Miter
+        );
+        assert_eq!(
+            stroke_join(StrokeJoin::Bevel),
+            lyon_tessellation::LineJoin::Bevel
+        );
+    }
+
+    #[test]
+    fn zero_width_and_move_only_path_are_empty() {
+        let rectangle = SceneShape::rect(rect(10.0, 10.0));
+        assert_eq!(
+            tessellate_stroke(&rectangle, StrokeStyle::new(length(0.0)))
+                .unwrap_or_else(|_| unreachable!("zero width is handled")),
+            TessellatedGeometry::empty()
+        );
+        let move_only = path(
+            vec![PathVerb::MoveTo(point(1.0, 1.0))],
+            PathFillRule::NonZero,
+        );
+        assert_eq!(
+            tessellate_fill(&move_only).unwrap_or_else(|_| unreachable!("move-only is handled")),
+            TessellatedGeometry::empty()
+        );
+        assert_eq!(
+            tessellate_stroke(&move_only, StrokeStyle::new(length(2.0)))
+                .unwrap_or_else(|_| unreachable!("move-only is handled")),
+            TessellatedGeometry::empty()
+        );
+    }
+}

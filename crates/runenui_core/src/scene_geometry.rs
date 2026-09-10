@@ -2,7 +2,7 @@
 
 use core::{error::Error, fmt, num::FpCategory};
 
-use crate::{LogicalPoint, LogicalRect, Radius, ScenePath};
+use crate::{LogicalLength, LogicalPoint, LogicalRect, Radius, ScenePath};
 
 /// Error returned when an affine logical transform contains a non-finite component.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -294,6 +294,19 @@ impl SceneShape {
         }
     }
 
+    /// Returns the framework-normalized corner radii for a rounded rectangle.
+    ///
+    /// This is a derived realization seam only. The authored [`Self::radius`]
+    /// value and structural equality remain unchanged, while containment and
+    /// downstream renderer adapters consume the same one-factor normalization.
+    #[must_use]
+    pub fn normalized_radius(&self) -> Option<Radius> {
+        match self {
+            Self::RoundedRect { rect, radius } => normalized_radius(*rect, *radius),
+            Self::Rect(_) | Self::Ellipse(_) | Self::Path(_) => None,
+        }
+    }
+
     /// Applies the exact framework-owned logical fill-containment contract.
     #[must_use]
     pub fn contains(&self, point: LogicalPoint) -> bool {
@@ -419,6 +432,20 @@ fn normalized_radii(rect: LogicalRect, radius: Radius) -> [f64; 4] {
         }
     }
     radii.map(|value| value * factor)
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "normalized radii return to the existing finite f32 logical-length value domain"
+)]
+fn normalized_radius(rect: LogicalRect, radius: Radius) -> Option<Radius> {
+    let [top_left, top_right, bottom_right, bottom_left] = normalized_radii(rect, radius);
+    Some(Radius::new(
+        LogicalLength::new(top_left as f32).ok()?,
+        LogicalLength::new(top_right as f32).ok()?,
+        LogicalLength::new(bottom_right as f32).ok()?,
+        LogicalLength::new(bottom_left as f32).ok()?,
+    ))
 }
 
 fn outside_rounded_corner(
@@ -557,6 +584,76 @@ mod tests {
         let shape = SceneShape::rounded_rect(rect, Radius::all(ten));
         assert!(shape.contains(point(0.0, 5.0)));
         assert!(!shape.contains(point(0.0, 0.0)));
+    }
+
+    #[test]
+    fn normalized_radius_preserves_valid_authored_radii() {
+        let rect = LogicalRect::try_new(0.0, 0.0, 20.0, 20.0)
+            .unwrap_or_else(|_| unreachable!("test rectangle is valid"));
+        let radius = Radius::new(
+            LogicalLength::new(1.0).unwrap_or_else(|_| unreachable!("test radius is valid")),
+            LogicalLength::new(2.0).unwrap_or_else(|_| unreachable!("test radius is valid")),
+            LogicalLength::new(3.0).unwrap_or_else(|_| unreachable!("test radius is valid")),
+            LogicalLength::new(4.0).unwrap_or_else(|_| unreachable!("test radius is valid")),
+        );
+        let shape = SceneShape::rounded_rect(rect, radius);
+        assert_eq!(shape.normalized_radius(), Some(radius));
+        assert_eq!(shape.radius(), Some(radius));
+    }
+
+    #[test]
+    fn normalized_radius_preserves_zero_radii() {
+        let rect = LogicalRect::try_new(0.0, 0.0, 10.0, 10.0)
+            .unwrap_or_else(|_| unreachable!("test rectangle is valid"));
+        let shape = SceneShape::rounded_rect(rect, Radius::ZERO);
+        assert_eq!(shape.normalized_radius(), Some(Radius::ZERO));
+    }
+
+    #[test]
+    fn normalized_radius_uses_one_common_factor_for_asymmetric_constraints() {
+        let rect = LogicalRect::try_new(0.0, 0.0, 10.0, 10.0)
+            .unwrap_or_else(|_| unreachable!("test rectangle is valid"));
+        let ten = LogicalLength::new(10.0).unwrap_or_else(|_| unreachable!("test radius is valid"));
+        let zero = LogicalLength::ZERO;
+        let authored = Radius::new(ten, ten, ten, zero);
+        let shape = SceneShape::rounded_rect(rect, authored);
+        let normalized = shape
+            .normalized_radius()
+            .unwrap_or_else(|| unreachable!("rounded rectangle has derived radii"));
+
+        assert_eq!(
+            normalized,
+            Radius::new(
+                LogicalLength::new(5.0)
+                    .unwrap_or_else(|_| unreachable!("normalized radius is valid")),
+                LogicalLength::new(5.0)
+                    .unwrap_or_else(|_| unreachable!("normalized radius is valid")),
+                LogicalLength::new(5.0)
+                    .unwrap_or_else(|_| unreachable!("normalized radius is valid")),
+                zero,
+            )
+        );
+        assert_eq!(shape.radius(), Some(authored));
+        assert_eq!(shape, SceneShape::rounded_rect(rect, authored));
+    }
+
+    #[test]
+    fn normalized_radius_keeps_opposite_side_sums_within_extents() {
+        let rect = LogicalRect::try_new(0.0, 0.0, 7.0, 5.0)
+            .unwrap_or_else(|_| unreachable!("test rectangle is valid"));
+        let radius = Radius::new(
+            LogicalLength::new(6.0).unwrap_or_else(|_| unreachable!("test radius is valid")),
+            LogicalLength::new(4.0).unwrap_or_else(|_| unreachable!("test radius is valid")),
+            LogicalLength::new(5.0).unwrap_or_else(|_| unreachable!("test radius is valid")),
+            LogicalLength::new(3.0).unwrap_or_else(|_| unreachable!("test radius is valid")),
+        );
+        let normalized = SceneShape::rounded_rect(rect, radius)
+            .normalized_radius()
+            .unwrap_or_else(|| unreachable!("rounded rectangle has derived radii"));
+        assert!(normalized.top_left().get() + normalized.top_right().get() <= rect.width());
+        assert!(normalized.bottom_left().get() + normalized.bottom_right().get() <= rect.width());
+        assert!(normalized.top_left().get() + normalized.bottom_left().get() <= rect.height());
+        assert!(normalized.top_right().get() + normalized.bottom_right().get() <= rect.height());
     }
 
     #[test]

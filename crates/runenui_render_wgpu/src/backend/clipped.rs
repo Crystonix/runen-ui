@@ -8,7 +8,7 @@ pub use resource::{PublicationRenderError, ResourceRenderer, UnsupportedShapedGl
 
 use std::collections::HashMap;
 
-use runenui_core::{Brush, Color, PaintPrimitive, Radius, SceneShape};
+use runenui_core::{Brush, Color, PaintPrimitive, SceneShape};
 use runenui_runtime::{PaintPublication, RasterScale, SceneClip};
 use wgpu::util::DeviceExt;
 
@@ -526,8 +526,8 @@ impl ClipUniform {
         let [m11, m12, m21, m22, tx, ty] = surface_to_clip.components();
         let (rect, radii, shape_kind) = match clip.shape() {
             SceneShape::Rect(rect) => (*rect, [0.0; 4], 0.0),
-            SceneShape::RoundedRect { rect, radius } => {
-                (*rect, normalized_clip_radii(*rect, *radius), 1.0)
+            SceneShape::RoundedRect { rect, .. } => {
+                (*rect, normalized_clip_radii(clip.shape())?, 1.0)
             }
             SceneShape::Ellipse(_) | SceneShape::Path(_) => return None,
         };
@@ -572,36 +572,14 @@ fn prepare_clip_uniforms(
         .collect()
 }
 
-fn normalized_clip_radii(rect: runenui_core::LogicalRect, radius: Radius) -> [f32; 4] {
-    let radii = [
-        f64::from(radius.top_left().get()),
-        f64::from(radius.top_right().get()),
-        f64::from(radius.bottom_right().get()),
-        f64::from(radius.bottom_left().get()),
-    ];
-    let width = f64::from(rect.width());
-    let height = f64::from(rect.height());
-    let mut factor = 1.0_f64;
-    for (extent, first, second) in [
-        (width, radii[0], radii[1]),
-        (width, radii[3], radii[2]),
-        (height, radii[0], radii[3]),
-        (height, radii[1], radii[2]),
-    ] {
-        let denominator = first + second;
-        if denominator > 0.0 {
-            factor = factor.min(extent / denominator);
-        }
-    }
-    narrow_normalized_radii(radii.map(|value| value * factor))
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "normalized radii originate as finite f32 logical lengths and the common normalization factor never exceeds one"
-)]
-fn narrow_normalized_radii(radii: [f64; 4]) -> [f32; 4] {
-    radii.map(|value| value as f32)
+fn normalized_clip_radii(shape: &SceneShape) -> Option<[f32; 4]> {
+    let radius = shape.normalized_radius()?;
+    Some([
+        radius.top_left().get(),
+        radius.top_right().get(),
+        radius.bottom_right().get(),
+        radius.bottom_left().get(),
+    ])
 }
 
 fn create_clipped_fill_pipeline(
