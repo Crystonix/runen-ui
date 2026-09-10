@@ -202,7 +202,9 @@ impl ResourceRenderer {
     /// # Errors
     ///
     /// Returns structured backend, adapter, or device diagnostics when construction fails.
-    pub async fn request(options: super::RendererOptions) -> Result<Self, super::RendererInitError> {
+    pub async fn request(
+        options: super::RendererOptions,
+    ) -> Result<Self, super::RendererInitError> {
         resource::ResourceRenderer::request(options)
             .await
             .map(|inner| Self { inner })
@@ -317,7 +319,8 @@ impl ResourceRenderer {
         publication: &PaintPublication,
         provider: &P,
     ) -> Result<super::OffscreenPublicationReadback, PublicationRenderError> {
-        self.inner.render_offscreen_publication(publication, provider)
+        self.inner
+            .render_offscreen_publication(publication, provider)
     }
 
     /// Renders one complete publication directly into the configured native surface.
@@ -370,9 +373,7 @@ struct Renderer {
 }
 
 impl Renderer {
-    async fn request(
-        options: super::RendererOptions,
-    ) -> Result<Self, super::RendererInitError> {
+    async fn request(options: super::RendererOptions) -> Result<Self, super::RendererInitError> {
         super::Renderer::request(options).await.map(Self::from_base)
     }
 
