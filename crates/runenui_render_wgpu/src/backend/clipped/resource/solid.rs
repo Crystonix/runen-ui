@@ -605,19 +605,17 @@ fn shade_once(
     render_pass.draw(0..3, 0..1);
 }
 
-fn shade_uniform_bytes(item: &SupportedSolid, raster_scale: RasterScale) -> [u8; SHADE_UNIFORM_SIZE] {
+fn shade_uniform_bytes(
+    item: &SupportedSolid,
+    raster_scale: RasterScale,
+) -> [u8; SHADE_UNIFORM_SIZE] {
     let inverse = item
         .local_to_surface
         .inverse()
         .unwrap_or_else(|| unreachable!("covered paint item has an invertible transform"));
     let [m11, m12, m21, m22, tx, ty] = inverse.components();
     let (solid, geometry, kind, stop_count) = match &item.brush {
-        Brush::Solid(color) => (
-            solid_color(*color, item.opacity),
-            [0.0; 4],
-            BRUSH_SOLID,
-            0,
-        ),
+        Brush::Solid(color) => (solid_color(*color, item.opacity), [0.0; 4], BRUSH_SOLID, 0),
         Brush::Linear(gradient) => (
             [0.0; 4],
             [
@@ -667,7 +665,12 @@ fn shade_uniform_bytes(item: &SupportedSolid, raster_scale: RasterScale) -> [u8;
         0,
     ];
     let mut bytes = [0_u8; SHADE_UNIFORM_SIZE];
-    for (destination, value) in bytes[..64].as_chunks_mut::<4>().0.iter_mut().zip(float_values) {
+    for (destination, value) in bytes[..64]
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(float_values)
+    {
         destination.copy_from_slice(&value.to_ne_bytes());
     }
     for (destination, value) in bytes[64..].as_chunks_mut::<4>().0.iter_mut().zip(meta) {
