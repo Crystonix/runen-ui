@@ -405,7 +405,7 @@ fn real_gpu_gradient_transform_clip_stroke_and_rebuild_are_deterministic()
     Ok(())
 }
 
-fn color_bytes(color: Color) -> [u8; 4] {
+const fn color_bytes(color: Color) -> [u8; 4] {
     [color.red(), color.green(), color.blue(), color.alpha()]
 }
 
