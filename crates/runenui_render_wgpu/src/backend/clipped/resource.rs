@@ -851,8 +851,9 @@ impl ResourceRenderer {
         scene: &[ResourceSceneItem],
     ) -> Result<(), PublicationRenderError> {
         let limits = self.literal.diagnostics().device_limits();
-        let max_bytes =
-            u64::from(limits.max_storage_buffer_binding_size).min(limits.max_buffer_size);
+        let max_bytes = limits
+            .max_storage_buffer_binding_size
+            .min(limits.max_buffer_size);
         for (item_index, item) in scene.iter().enumerate() {
             let ResourceSceneItem::Solid(item) = item else {
                 continue;
