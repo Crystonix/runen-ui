@@ -553,7 +553,7 @@ mod tests {
                 .try_into()
                 .unwrap_or_else(|_| unreachable!("shade alpha occupies four bytes")),
         );
-        assert!((alpha - (128.0 / 255.0 * 0.5)).abs() < f32::EPSILON);
+        assert!((128.0_f32 / 255.0).mul_add(-0.5, alpha).abs() < f32::EPSILON);
     }
 
     #[test]
