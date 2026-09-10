@@ -14,12 +14,12 @@ use crate::tessellation::{
     TessellatedGeometry, TessellationError, tessellate_fill, tessellate_stroke,
 };
 
-use super::super::{
-    ClipTargetPipelines, STENCIL_ALLOWED, STENCIL_FORMAT, apply_clip_mask, prepare_clip_uniforms,
-};
 use super::super::super::{
     OffscreenExtent, OffscreenRenderError, RasterCanvasExtent, clip_polygon_to_canvas,
     physical_point_to_ndc, srgb8_to_linear_f32,
+};
+use super::super::{
+    ClipTargetPipelines, STENCIL_ALLOWED, STENCIL_FORMAT, apply_clip_mask, prepare_clip_uniforms,
 };
 
 const COVERAGE_VERTEX_SIZE: usize = 8;
