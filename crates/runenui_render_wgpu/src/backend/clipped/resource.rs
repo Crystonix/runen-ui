@@ -1,6 +1,8 @@
+mod solid;
+
 use std::collections::HashSet;
 
-use runenui_core::{Color, LogicalSize, PaintPrimitive, ResourceKind, ResourceRef};
+use runenui_core::{Brush, Color, LogicalSize, PaintPrimitive, ResourceKind, ResourceRef, SceneShape};
 use runenui_runtime::{PaintPublication, RasterScale, SceneCapabilities, SceneClip};
 use wgpu::util::DeviceExt;
 
@@ -9,10 +11,7 @@ use crate::{
     WgpuHasDisplayHandle,
     lineage::PublicationLineage,
     observation::{ResourceCacheOutcome, ResourceObservation, ResourceRealizationKind},
-    scene_subset::{
-        SceneValidationError, UnsupportedSceneSemantic, validate_item_composition,
-        validate_literal_rect_item,
-    },
+    scene_subset::{SceneValidationError, UnsupportedSceneSemantic, validate_item_composition},
 };
 
 use super::super::{
@@ -22,9 +21,8 @@ use super::super::{
     scene_validation_error,
 };
 use super::{
-    ClipTargetPipelines, LiteralRectItem, Renderer, apply_clip_mask, clear_color_target,
-    clear_stencil_mask, create_stencil_target, draw_clipped_fill, draw_unclipped_fill, image,
-    prepare_clip_uniforms, shaped, stroke_mask,
+    ClipTargetPipelines, Renderer, apply_clip_mask, clear_color_target, clear_stencil_mask,
+    create_stencil_target, image, prepare_clip_uniforms, shaped,
 };
 
 /// Explicitly unsupported glyph source encountered during renderer-owned outline realization.
@@ -42,6 +40,8 @@ pub enum UnsupportedShapedGlyphKind {
 pub enum PublicationRenderError {
     /// Existing renderer/device/target/readback failure.
     Backend(OffscreenRenderError),
+    /// Private solid geometry realization failed before target mutation.
+    SolidGeometry { item_index: usize, detail: String },
     /// Caller-owned logical resource resolution failed before target mutation.
     Resource {
         item_index: usize,
@@ -99,6 +99,10 @@ impl core::fmt::Display for PublicationRenderError {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Backend(error) => error.fmt(formatter),
+            Self::SolidGeometry { item_index, detail } => write!(
+                formatter,
+                "renderer failed to realize solid geometry for scene item {item_index}: {detail}"
+            ),
             Self::Resource { item_index, error } => write!(
                 formatter,
                 "renderer failed to resolve resource for scene item {item_index}: {error}"
@@ -180,7 +184,8 @@ impl core::error::Error for PublicationRenderError {
         match self {
             Self::Backend(error) => Some(error),
             Self::Resource { error, .. } => Some(error),
-            Self::ImageExtentExceedsDeviceLimit { .. }
+            Self::SolidGeometry { .. }
+            | Self::ImageExtentExceedsDeviceLimit { .. }
             | Self::ImageRowBytesOverflow { .. }
             | Self::ShapedGlyphExtentExceedsDeviceLimit { .. }
             | Self::ShapedTextResourceUnavailable { .. }
@@ -209,7 +214,8 @@ impl From<OffscreenRenderError> for PublicationRenderError {
 impl PublicationRenderError {
     const fn item_index(&self) -> Option<usize> {
         match self {
-            Self::Resource { item_index, .. }
+            Self::SolidGeometry { item_index, .. }
+            | Self::Resource { item_index, .. }
             | Self::ImageExtentExceedsDeviceLimit { item_index, .. }
             | Self::ImageRowBytesOverflow { item_index, .. }
             | Self::ShapedGlyphExtentExceedsDeviceLimit { item_index, .. }
@@ -233,14 +239,13 @@ impl PublicationRenderError {
 
 /// Canonical provider-aware renderer facade.
 ///
-/// The already-proven literal renderer remains private implementation machinery
-/// and continues to own the single wgpu instance/device/queue/target/lineage.
-/// External image upload, bind groups, and sampled textures are disposable child
-/// caches keyed only by the complete opaque `ResourceRef`; shaped text is resolved
-/// directly from the publication's retained logical resource.
+/// The wrapped renderer remains the single owner of instance/device/queue/targets
+/// and publication lineage. Solid tessellation/coverage, external images, and shaped
+/// text are disposable realization details under this one mixed-scene transaction.
 #[derive(Debug)]
 pub struct ResourceRenderer {
     literal: Renderer,
+    solids: solid::SolidRenderer,
     images: image::ImageRenderer,
     shaped_runs: shaped::ShapedRunRenderer,
     surface_extent: Option<OffscreenExtent>,
@@ -250,19 +255,11 @@ pub struct ResourceRenderer {
 
 impl ResourceRenderer {
     /// Selects a native adapter and creates a renderer-owned wgpu device and queue.
-    ///
-    /// # Errors
-    ///
-    /// Returns structured backend, adapter, or device diagnostics when construction fails.
     pub async fn request(options: RendererOptions) -> Result<Self, RendererInitError> {
         Renderer::request(options).await.map(Self::from_literal)
     }
 
     /// Selects a native adapter using a caller-owned display connection.
-    ///
-    /// # Errors
-    ///
-    /// Returns structured backend, adapter, or device diagnostics when construction fails.
     pub async fn request_with_display_handle(
         options: RendererOptions,
         display: Box<dyn WgpuHasDisplayHandle>,
@@ -273,11 +270,6 @@ impl ResourceRenderer {
     }
 
     /// Creates and retains a native surface before selecting a compatible adapter.
-    ///
-    /// # Errors
-    ///
-    /// Returns structured surface-creation, compatible-adapter, target-format, or
-    /// device diagnostics when construction fails.
     pub async fn request_with_surface_target(
         options: RendererOptions,
         display: Box<dyn WgpuHasDisplayHandle>,
@@ -289,10 +281,12 @@ impl ResourceRenderer {
     }
 
     fn from_literal(literal: Renderer) -> Self {
+        let solids = solid::SolidRenderer::new();
         let images = image::ImageRenderer::new(&literal.base.device);
         let shaped_runs = shaped::ShapedRunRenderer::new(&literal.base.device);
         Self {
             literal,
+            solids,
             images,
             shaped_runs,
             surface_extent: None,
@@ -301,47 +295,32 @@ impl ResourceRenderer {
         }
     }
 
-    /// Returns immutable instance, adapter, device, and target diagnostics.
     #[must_use]
     pub const fn diagnostics(&self) -> &RendererDiagnostics {
         self.literal.diagnostics()
     }
 
-    /// Returns the immutable observation for the most recent publication attempt.
     #[must_use]
     pub const fn last_observation(&self) -> Option<&crate::PublicationObservation> {
         self.literal.last_observation()
     }
 
-    /// Returns whether construction retained an actual native surface target.
     #[must_use]
     pub const fn has_surface(&self) -> bool {
         self.literal.has_surface()
     }
 
-    /// Returns the exact configured native surface extent, when configured.
     #[must_use]
     pub const fn configured_surface_extent(&self) -> Option<OffscreenExtent> {
         self.surface_extent
     }
 
-    /// Returns the renderer-local generation of the current native surface configuration.
     #[must_use]
     pub const fn surface_target_generation(&self) -> u64 {
         self.surface_target_generation
     }
 
     /// Configures the retained native surface for one non-zero physical extent.
-    ///
-    /// Reconfiguration creates a new renderer-local target generation and forgets
-    /// successful surface-publication lineage. Resource uploads remain disposable
-    /// renderer state and may be reused across target recreation.
-    ///
-    /// # Errors
-    ///
-    /// Returns a structured error when no native surface exists, the extent is
-    /// invalid for the selected device, or the renderer cannot allocate another
-    /// target generation.
     pub fn configure_surface(
         &mut self,
         width: u32,
@@ -380,16 +359,11 @@ impl ResourceRenderer {
         Ok(extent)
     }
 
-    /// Drops the retained offscreen target and every publication realization tied to it.
     #[must_use]
     pub fn discard_offscreen_target(&mut self) -> bool {
         self.literal.discard_offscreen_target()
     }
 
-    /// Drops renderer-owned uploaded resource realizations without changing logical refs.
-    ///
-    /// A real cache loss also invalidates successful publication lineage so the
-    /// next complete publication is reconstructed with a full resync on every target.
     #[must_use]
     pub fn discard_resource_cache(&mut self) -> bool {
         let images_discarded = self.images.discard_cache();
@@ -406,42 +380,19 @@ impl ResourceRenderer {
 
     /// Renders one complete publication and reads actual GPU bytes.
     ///
-    /// Publications without provider-backed resources delegate to the already-proven
-    /// literal renderer. Resource-bearing publications preserve exact scene order across
-    /// fills, centered strokes, images, and shaped runs; payload resolution completes
-    /// before retained-target mutation.
-    ///
-    /// # Errors
-    ///
-    /// Returns deterministic scene, resource, image-limit, target, device, or
-    /// readback failures. A missing/unavailable/malformed provider result never
-    /// mutates the retained target.
+    /// Solid fill/stroke geometry, images, and shaped text share one ordered target
+    /// transaction. All scene validation, solid tessellation, and resource preflight
+    /// complete before retained-target mutation.
     #[allow(
         clippy::too_many_lines,
-        reason = "the provider-backed render transaction intentionally keeps complete validation and resource preflight before target mutation, then ordered realization/submission/readback, and only then lineage/cache commit in one auditable sequence"
+        reason = "the mixed render transaction intentionally keeps preflight, target mutation, ordered realization, readback, and lineage commit in one auditable sequence"
     )]
     pub fn render_offscreen_publication<P: ResourceProvider + ?Sized>(
         &mut self,
         publication: &PaintPublication,
         provider: &P,
     ) -> Result<OffscreenPublicationReadback, PublicationRenderError> {
-        if !publication.scene().items().iter().any(|item| {
-            matches!(
-                item.primitive(),
-                PaintPrimitive::Image(_) | PaintPrimitive::ShapedTextRun(_)
-            )
-        }) {
-            let result = self
-                .literal
-                .render_offscreen_publication(publication)
-                .map_err(PublicationRenderError::Backend);
-            if result.is_ok() {
-                let _ = self.discard_resource_cache();
-            }
-            return result;
-        }
-
-        let scene = validate_resource_scene_subset(publication).map_err(scene_validation_error)?;
+        let scene = prepare_resource_scene(publication)?;
         let (canvas_extent, extent) = publication_extents(publication)?;
         self.literal.base.validate_extent(extent)?;
         let layout = ReadbackLayout::new(extent)?;
@@ -478,9 +429,9 @@ impl ResourceRenderer {
         );
         self.literal.base.record_observation(observation);
 
-        let has_literals = scene
+        let has_solids = scene
             .iter()
-            .any(|item| matches!(item, ResourceSceneItem::Literal(_)));
+            .any(|item| matches!(item, ResourceSceneItem::Solid(_)));
         let has_images = scene
             .iter()
             .any(|item| matches!(item, ResourceSceneItem::Image(_)));
@@ -488,6 +439,7 @@ impl ResourceRenderer {
             .iter()
             .any(|item| matches!(item, ResourceSceneItem::ShapedTextRun(_)));
         let needs_stencil = scene.iter().any(ResourceSceneItem::needs_stencil);
+        let needs_clip_pipelines = scene.iter().any(ResourceSceneItem::has_clips);
         let live_images = live_image_resources(&scene);
         let live_shaped_runs = live_shaped_run_resources(&scene, publication);
         let initial_resource_observations = resource_observations_for_scene(
@@ -538,12 +490,11 @@ impl ResourceRenderer {
             if let Some(observation) = self.literal.base.last_observation.as_mut() {
                 observation.set_resource_observations(resource_observations);
             }
-            if has_literals {
-                self.literal
-                    .base
-                    .ensure_fill_rect_pipeline(OFFSCREEN_FORMAT)?;
+            if has_solids {
+                self.solids
+                    .ensure_pipelines(&self.literal.base.device, OFFSCREEN_FORMAT)?;
             }
-            if needs_stencil {
+            if needs_clip_pipelines {
                 self.literal.ensure_clip_pipelines(OFFSCREEN_FORMAT)?;
             }
             if has_images {
@@ -577,7 +528,7 @@ impl ResourceRenderer {
                 .base
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runenui provider-backed offscreen publication encoder"),
+                    label: Some("runenui mixed offscreen publication encoder"),
                 });
         let target = self
             .literal
@@ -595,22 +546,15 @@ impl ResourceRenderer {
             && needs_stencil)
             .then(|| create_stencil_target(&self.literal.base.device, extent));
         if update_plan.mode() != PublicationUpdateMode::AlreadyCurrent {
-            let ordinary_pipeline = has_literals.then(|| {
-                self.literal
-                    .base
-                    .fill_rect_pipelines
-                    .get(&target.format)
-                    .unwrap_or_else(|| unreachable!("ordinary target pipeline is cached"))
-            });
-            let clip_pipelines = needs_stencil.then(|| {
+            let clip_pipelines = needs_clip_pipelines.then(|| {
                 self.literal
                     .clip_pipelines
                     .get(&target.format)
-                    .unwrap_or_else(|| unreachable!("literal mask pipelines are cached"))
+                    .unwrap_or_else(|| unreachable!("clip pipelines are cached"))
             });
             encode_resource_scene_to_target(
                 &self.literal.base.device,
-                ordinary_pipeline,
+                &self.solids,
                 clip_pipelines,
                 &self.images,
                 &mut encoder,
@@ -679,32 +623,10 @@ impl ResourceRenderer {
         })
     }
 
-    /// Renders one complete provider-backed publication directly into the configured
-    /// native surface and schedules that exact texture for presentation.
-    ///
-    /// The configured surface extent is the exact native physical target authority.
-    /// Publication logical size and raster scale define only the continuous raster-space
-    /// canvas; they are never multiplied back into an integer native extent. This avoids
-    /// introducing a second, float-rounded version of the host-owned physical mapping.
-    /// Surface and offscreen targets keep independent successful-publication lineage.
-    /// A swapchain image is always rendered completely because an `AlreadyCurrent`
-    /// classification describes logical renderer state, not the contents of the newly
-    /// acquired native image. Resource preflight still completes before acquisition.
-    /// After GPU submission, `before_present` is invoked exactly once immediately before
-    /// native presentation so the caller can perform host-specific pre-present work
-    /// without exposing native host types to the renderer. Successful surface lineage
-    /// advances only after `Queue::present` is called.
-    ///
-    /// # Errors
-    ///
-    /// Returns deterministic publication/resource/backend failures plus structured
-    /// native-surface recovery states. Timeout and occlusion may be retried later;
-    /// outdated/suboptimal targets should be reconfigured; a lost surface requires
-    /// recreating the renderer from the host-owned window target. `before_present` is
-    /// not invoked for failures that occur before successful GPU submission.
+    /// Renders one complete publication directly into the configured native surface.
     #[allow(
         clippy::too_many_lines,
-        reason = "the native surface transaction keeps validation/resource preflight, target acquisition, the shared mixed-scene encoder, submission, the caller-owned pre-present boundary, present, and successful-lineage commit in one auditable sequence"
+        reason = "the native surface transaction keeps preflight, acquisition, shared mixed-scene encoding, submission, present, and lineage commit in one auditable sequence"
     )]
     pub fn render_surface_publication<P: ResourceProvider + ?Sized>(
         &mut self,
@@ -712,7 +634,7 @@ impl ResourceRenderer {
         provider: &P,
         before_present: impl FnOnce(),
     ) -> Result<crate::PublicationObservation, PublicationRenderError> {
-        let scene = validate_resource_scene_subset(publication).map_err(scene_validation_error)?;
+        let scene = prepare_resource_scene(publication)?;
         let extent = self
             .surface_extent
             .ok_or(PublicationRenderError::SurfaceNotConfigured)?;
@@ -733,9 +655,9 @@ impl ResourceRenderer {
         );
         self.literal.base.record_observation(observation);
 
-        let has_literals = scene
+        let has_solids = scene
             .iter()
-            .any(|item| matches!(item, ResourceSceneItem::Literal(_)));
+            .any(|item| matches!(item, ResourceSceneItem::Solid(_)));
         let has_images = scene
             .iter()
             .any(|item| matches!(item, ResourceSceneItem::Image(_)));
@@ -743,6 +665,7 @@ impl ResourceRenderer {
             .iter()
             .any(|item| matches!(item, ResourceSceneItem::ShapedTextRun(_)));
         let needs_stencil = scene.iter().any(ResourceSceneItem::needs_stencil);
+        let needs_clip_pipelines = scene.iter().any(ResourceSceneItem::has_clips);
         let live_images = live_image_resources(&scene);
         let live_shaped_runs = live_shaped_run_resources(&scene, publication);
         let initial_resource_observations = resource_observations_for_scene(
@@ -793,10 +716,11 @@ impl ResourceRenderer {
             if let Some(observation) = self.literal.base.last_observation.as_mut() {
                 observation.set_resource_observations(resource_observations);
             }
-            if has_literals {
-                self.literal.base.ensure_fill_rect_pipeline(target_format)?;
+            if has_solids {
+                self.solids
+                    .ensure_pipelines(&self.literal.base.device, target_format)?;
             }
-            if needs_stencil {
+            if needs_clip_pipelines {
                 self.literal.ensure_clip_pipelines(target_format)?;
             }
             if has_images {
@@ -855,29 +779,22 @@ impl ResourceRenderer {
             .create_view(&wgpu::TextureViewDescriptor::default());
         let stencil_target =
             needs_stencil.then(|| create_stencil_target(&self.literal.base.device, extent));
-        let ordinary_pipeline = has_literals.then(|| {
-            self.literal
-                .base
-                .fill_rect_pipelines
-                .get(&target_format)
-                .unwrap_or_else(|| unreachable!("native literal target pipeline is cached"))
-        });
-        let clip_pipelines = needs_stencil.then(|| {
+        let clip_pipelines = needs_clip_pipelines.then(|| {
             self.literal
                 .clip_pipelines
                 .get(&target_format)
-                .unwrap_or_else(|| unreachable!("native literal mask pipelines are cached"))
+                .unwrap_or_else(|| unreachable!("native clip pipelines are cached"))
         });
         let mut encoder =
             self.literal
                 .base
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runenui provider-backed native surface publication encoder"),
+                    label: Some("runenui mixed native surface publication encoder"),
                 });
         encode_resource_scene_to_target(
             &self.literal.base.device,
-            ordinary_pipeline,
+            &self.solids,
             clip_pipelines,
             &self.images,
             &mut encoder,
@@ -1056,11 +973,6 @@ impl ResourceRenderer {
         Ok(resolved)
     }
 
-    /// Executes one real wgpu render-pass clear and returns actual GPU bytes from GPU readback.
-    ///
-    /// # Errors
-    ///
-    /// Returns structured extent, device-wait, buffer-map, or mapped-range failures.
     pub fn clear_offscreen(
         &self,
         extent: OffscreenExtent,
@@ -1107,7 +1019,7 @@ fn image_failure(item_index: usize, failure: image::ImageResolveFailure) -> Publ
 
 #[derive(Clone, Debug, PartialEq)]
 enum ResourceSceneItem {
-    Literal(LiteralRectItem),
+    Solid(solid::SupportedSolid),
     Image(ImageSceneItem),
     ShapedTextRun(ShapedTextRunSceneItem),
 }
@@ -1115,7 +1027,15 @@ enum ResourceSceneItem {
 impl ResourceSceneItem {
     const fn needs_stencil(&self) -> bool {
         match self {
-            Self::Literal(item) => item.literal.stroke_inset.is_some() || !item.clips.is_empty(),
+            Self::Solid(_) => true,
+            Self::Image(item) => !item.clips.is_empty(),
+            Self::ShapedTextRun(item) => !item.clips.is_empty(),
+        }
+    }
+
+    const fn has_clips(&self) -> bool {
+        match self {
+            Self::Solid(item) => item.has_clips(),
             Self::Image(item) => !item.clips.is_empty(),
             Self::ShapedTextRun(item) => !item.clips.is_empty(),
         }
@@ -1134,9 +1054,9 @@ struct ShapedTextRunSceneItem {
     clips: Vec<SceneClip>,
 }
 
-fn validate_resource_scene_subset(
+fn prepare_resource_scene(
     publication: &PaintPublication,
-) -> Result<Vec<ResourceSceneItem>, SceneValidationError> {
+) -> Result<Vec<ResourceSceneItem>, PublicationRenderError> {
     let requirements = publication.scene().requirements();
     let capabilities = SceneCapabilities::new([ResourceKind::Image, ResourceKind::ShapedTextRun]);
     let unsupported_resource_kind =
@@ -1148,66 +1068,129 @@ fn validate_resource_scene_subset(
             });
     let mut items = Vec::with_capacity(publication.scene().items().len());
     for (item_index, item) in publication.scene().items().iter().enumerate() {
-        validate_item_composition(item_index, item)?;
-        if let PaintPrimitive::Image(image_primitive) = item.primitive() {
-            let Some(intrinsic_size) = image_primitive.resolved_intrinsic_size() else {
-                return Err(SceneValidationError::UnsupportedItem {
-                    item_index,
-                    semantic: UnsupportedSceneSemantic::Image,
-                });
+        validate_item_composition(item_index, item).map_err(scene_failure)?;
+        for clip in item.clips() {
+            let semantic = match clip.shape() {
+                SceneShape::Rect(_) | SceneShape::RoundedRect { .. } => None,
+                SceneShape::Ellipse(_) => Some(UnsupportedSceneSemantic::EllipseClip),
+                SceneShape::Path(_) => Some(UnsupportedSceneSemantic::PathClip),
             };
-            let patch_count = image_primitive
-                .resolved_patch_count()
-                .unwrap_or_else(|| unreachable!("resolved intrinsic metadata implies patches"));
-            let patches = (0..patch_count)
-                .map(|patch_index| {
-                    let (source, destination) = image_primitive
-                        .resolved_patch(patch_index)
-                        .unwrap_or_else(|| unreachable!("resolved patch count is exact"));
-                    image::SupportedImagePatch {
-                        source,
-                        destination,
-                    }
-                })
-                .collect();
-            items.push(ResourceSceneItem::Image(ImageSceneItem {
-                image: image::SupportedImage {
+            if let Some(semantic) = semantic {
+                return Err(scene_failure(SceneValidationError::UnsupportedItem {
                     item_index,
-                    resource: image_primitive.resource_ref().clone(),
-                    intrinsic_size,
-                    patches,
-                    opacity: item.opacity(),
-                    local_to_surface: item.local_to_surface(),
-                },
-                clips: item.clips().to_vec(),
-            }));
-            continue;
+                    semantic,
+                }));
+            }
         }
-        if let PaintPrimitive::ShapedTextRun(shaped_run) = item.primitive() {
-            items.push(ResourceSceneItem::ShapedTextRun(ShapedTextRunSceneItem {
-                shaped_run: shaped::SupportedShapedRun {
+
+        match item.primitive() {
+            PaintPrimitive::Fill { shape, brush } => {
+                let Brush::Solid(color) = brush else {
+                    return Err(scene_failure(SceneValidationError::UnsupportedItem {
+                        item_index,
+                        semantic: UnsupportedSceneSemantic::NonSolidBrush,
+                    }));
+                };
+                let solid = solid::SupportedSolid::fill(
+                    shape,
+                    *color,
+                    item.opacity(),
+                    item.local_to_surface(),
+                    item.clips().to_vec(),
+                )
+                .map_err(|error| PublicationRenderError::SolidGeometry {
                     item_index,
-                    resource: shaped_run.resource_ref().clone(),
-                    origin: shaped_run.origin(),
-                    foreground: shaped_run.foreground(),
-                    opacity: item.opacity(),
-                    local_to_surface: item.local_to_surface(),
-                },
-                clips: item.clips().to_vec(),
-            }));
-            continue;
-        }
-        if let Some(literal) = validate_literal_rect_item(item_index, item)? {
-            items.push(ResourceSceneItem::Literal(LiteralRectItem {
-                literal,
-                clips: item.clips().to_vec(),
-            }));
+                    detail: error.to_string(),
+                })?;
+                items.push(ResourceSceneItem::Solid(solid));
+            }
+            PaintPrimitive::Stroke {
+                shape,
+                brush,
+                style,
+            } => {
+                let Brush::Solid(color) = brush else {
+                    return Err(scene_failure(SceneValidationError::UnsupportedItem {
+                        item_index,
+                        semantic: UnsupportedSceneSemantic::NonSolidBrush,
+                    }));
+                };
+                let solid = solid::SupportedSolid::stroke(
+                    shape,
+                    *style,
+                    *color,
+                    item.opacity(),
+                    item.local_to_surface(),
+                    item.clips().to_vec(),
+                )
+                .map_err(|error| PublicationRenderError::SolidGeometry {
+                    item_index,
+                    detail: error.to_string(),
+                })?;
+                items.push(ResourceSceneItem::Solid(solid));
+            }
+            PaintPrimitive::Image(image_primitive) => {
+                let Some(intrinsic_size) = image_primitive.resolved_intrinsic_size() else {
+                    return Err(scene_failure(SceneValidationError::UnsupportedItem {
+                        item_index,
+                        semantic: UnsupportedSceneSemantic::Image,
+                    }));
+                };
+                let patch_count = image_primitive.resolved_patch_count().unwrap_or_else(|| {
+                    unreachable!("resolved intrinsic metadata implies patches")
+                });
+                let patches = (0..patch_count)
+                    .map(|patch_index| {
+                        let (source, destination) = image_primitive
+                            .resolved_patch(patch_index)
+                            .unwrap_or_else(|| unreachable!("resolved patch count is exact"));
+                        image::SupportedImagePatch {
+                            source,
+                            destination,
+                        }
+                    })
+                    .collect();
+                items.push(ResourceSceneItem::Image(ImageSceneItem {
+                    image: image::SupportedImage {
+                        item_index,
+                        resource: image_primitive.resource_ref().clone(),
+                        intrinsic_size,
+                        patches,
+                        opacity: item.opacity(),
+                        local_to_surface: item.local_to_surface(),
+                    },
+                    clips: item.clips().to_vec(),
+                }));
+            }
+            PaintPrimitive::ShapedTextRun(shaped_run) => {
+                items.push(ResourceSceneItem::ShapedTextRun(ShapedTextRunSceneItem {
+                    shaped_run: shaped::SupportedShapedRun {
+                        item_index,
+                        resource: shaped_run.resource_ref().clone(),
+                        origin: shaped_run.origin(),
+                        foreground: shaped_run.foreground(),
+                        opacity: item.opacity(),
+                        local_to_surface: item.local_to_surface(),
+                    },
+                    clips: item.clips().to_vec(),
+                }));
+            }
+            _ => {
+                return Err(scene_failure(SceneValidationError::UnsupportedItem {
+                    item_index,
+                    semantic: UnsupportedSceneSemantic::UnknownPrimitive,
+                }));
+            }
         }
     }
     if let Some(error) = unsupported_resource_kind {
-        return Err(error);
+        return Err(scene_failure(error));
     }
     Ok(items)
+}
+
+fn scene_failure(error: SceneValidationError) -> PublicationRenderError {
+    PublicationRenderError::Backend(scene_validation_error(error))
 }
 
 fn live_image_resources(scene: &[ResourceSceneItem]) -> HashSet<ResourceRef> {
@@ -1215,7 +1198,7 @@ fn live_image_resources(scene: &[ResourceSceneItem]) -> HashSet<ResourceRef> {
         .iter()
         .filter_map(|item| match item {
             ResourceSceneItem::Image(item) => Some(item.image.resource.clone()),
-            ResourceSceneItem::Literal(_) | ResourceSceneItem::ShapedTextRun(_) => None,
+            ResourceSceneItem::Solid(_) | ResourceSceneItem::ShapedTextRun(_) => None,
         })
         .collect()
 }
@@ -1240,7 +1223,7 @@ fn live_shaped_run_resources(
                         ),
                     )
                 }),
-            ResourceSceneItem::Literal(_) | ResourceSceneItem::Image(_) => None,
+            ResourceSceneItem::Solid(_) | ResourceSceneItem::Image(_) => None,
         })
         .collect()
 }
@@ -1318,18 +1301,18 @@ fn resource_observations_for_scene(
                     cache_outcome,
                 ))
             }
-            ResourceSceneItem::Literal(_) => None,
+            ResourceSceneItem::Solid(_) => None,
         })
         .collect()
 }
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "the ordered mixed-scene encoder keeps the single device, exact target/canvas/scale, optional stencil realization, and established literal/image pipeline authorities explicit"
+    reason = "the ordered mixed-scene encoder keeps the single device, exact target/canvas/scale, disposable solid coverage, optional clip realization, and resource renderers explicit"
 )]
 fn encode_resource_scene_to_target(
     device: &wgpu::Device,
-    ordinary_pipeline: Option<&wgpu::RenderPipeline>,
+    solid_renderer: &solid::SolidRenderer,
     clip_pipelines: Option<&ClipTargetPipelines>,
     image_renderer: &image::ImageRenderer,
     encoder: &mut wgpu::CommandEncoder,
@@ -1346,13 +1329,14 @@ fn encode_resource_scene_to_target(
     clear_color_target(encoder, color_view);
     for item in scene {
         match item {
-            ResourceSceneItem::Literal(item) => encode_resource_literal_item(
+            ResourceSceneItem::Solid(item) => solid_renderer.encode_item(
                 device,
-                ordinary_pipeline,
                 clip_pipelines,
                 encoder,
                 color_view,
-                stencil_view,
+                stencil_view
+                    .unwrap_or_else(|| unreachable!("solid item requires stencil target")),
+                target_format,
                 extent,
                 canvas_extent,
                 raster_scale,
@@ -1387,90 +1371,6 @@ fn encode_resource_scene_to_target(
             ),
         }
     }
-}
-
-#[allow(
-    clippy::too_many_arguments,
-    reason = "mixed-scene literal dispatch reuses the established exact rectangle/stroke/clip helpers while keeping its already-validated target realization inputs explicit"
-)]
-fn encode_resource_literal_item(
-    device: &wgpu::Device,
-    ordinary_pipeline: Option<&wgpu::RenderPipeline>,
-    clip_pipelines: Option<&ClipTargetPipelines>,
-    encoder: &mut wgpu::CommandEncoder,
-    color_view: &wgpu::TextureView,
-    stencil_view: Option<&wgpu::TextureView>,
-    extent: OffscreenExtent,
-    canvas_extent: RasterCanvasExtent,
-    raster_scale: RasterScale,
-    item: &LiteralRectItem,
-) {
-    let vertex_bytes = super::super::fill_rect_vertex_bytes(
-        std::slice::from_ref(&item.literal.fill),
-        extent,
-        canvas_extent,
-        raster_scale,
-    );
-    if vertex_bytes.is_empty() {
-        return;
-    }
-    let vertex_count = u32::try_from(vertex_bytes.len() / 24).unwrap_or(u32::MAX);
-    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("runenui ordered mixed-scene literal vertices"),
-        contents: &vertex_bytes,
-        usage: wgpu::BufferUsages::VERTEX,
-    });
-
-    if item.literal.stroke_inset.is_none() && item.clips.is_empty() {
-        draw_unclipped_fill(
-            encoder,
-            color_view,
-            ordinary_pipeline
-                .unwrap_or_else(|| unreachable!("literal pipeline exists for literal scene items")),
-            &vertex_buffer,
-            vertex_count,
-        );
-        return;
-    }
-
-    let Some(clip_uniforms) = prepare_clip_uniforms(&item.clips, raster_scale) else {
-        return;
-    };
-    let stroke_uniform = if item.literal.stroke_inset.is_some() {
-        let Some(uniform) =
-            stroke_mask::StrokeMaskUniform::from_literal(&item.literal, raster_scale)
-        else {
-            return;
-        };
-        Some(uniform)
-    } else {
-        None
-    };
-    let stencil_view =
-        stencil_view.unwrap_or_else(|| unreachable!("masked literal item requires stencil target"));
-    let clip_pipelines = clip_pipelines
-        .unwrap_or_else(|| unreachable!("masked literal item requires mask pipelines"));
-    clear_stencil_mask(encoder, stencil_view);
-    if let Some(uniform) = stroke_uniform {
-        stroke_mask::apply_stroke_mask(
-            device,
-            encoder,
-            stencil_view,
-            &clip_pipelines.stroke_mask,
-            uniform,
-        );
-    }
-    for uniform in &clip_uniforms {
-        apply_clip_mask(device, encoder, stencil_view, &clip_pipelines.mask, uniform);
-    }
-    draw_clipped_fill(
-        encoder,
-        color_view,
-        stencil_view,
-        &clip_pipelines.clipped_fill,
-        &vertex_buffer,
-        vertex_count,
-    );
 }
 
 #[allow(
@@ -1538,7 +1438,7 @@ fn encode_resource_image_item(
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "mixed-scene shaped-text dispatch keeps exact geometry, renderer quality realization, target format, optional stencil realization, and the sampled MSDF atlas pipeline explicit"
+    reason = "mixed-scene shaped-text dispatch keeps exact geometry, renderer quality realization, target format, optional stencil realization, and sampled MSDF atlas authority explicit"
 )]
 fn encode_resource_shaped_run_item(
     device: &wgpu::Device,
@@ -1621,8 +1521,8 @@ mod tests {
     use runenui_runtime::{AppRuntime, LayoutConstraints, RasterScale, SurfaceBuildContext};
 
     use super::{
-        OffscreenExtent, SceneValidationError, UnsupportedSceneSemantic, surface_canvas_extent,
-        validate_resource_scene_subset,
+        OffscreenExtent, OffscreenRenderError, PublicationRenderError, prepare_resource_scene,
+        surface_canvas_extent,
     };
 
     #[derive(Debug)]
@@ -1690,13 +1590,15 @@ mod tests {
             PaintPrimitive::Image(_)
         ));
 
-        assert_eq!(
-            validate_resource_scene_subset(publication.paint_publication()),
-            Err(SceneValidationError::UnsupportedItem {
-                item_index: 0,
-                semantic: UnsupportedSceneSemantic::CompositionGroup,
-            })
-        );
+        assert!(matches!(
+            prepare_resource_scene(publication.paint_publication()),
+            Err(PublicationRenderError::Backend(
+                OffscreenRenderError::UnsupportedScene {
+                    item_index: Some(0),
+                    ..
+                }
+            ))
+        ));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! Disposable CPU tessellation for the later renderer realization checkpoint.
+//! Disposable CPU tessellation for renderer realization.
 //!
 //! The module deliberately stops at validated CPU geometry. Lyon paths and
 //! tessellator state are temporary implementation details; they do not become
@@ -26,7 +26,7 @@ type EndpointTangents = (Tangent, Tangent);
 
 /// Failure from the private neutral-to-Lyon realization adapter.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum TessellationError {
+pub(crate) enum TessellationError {
     /// An intermediate point or generated vertex was not finite.
     NonFiniteGeometry,
     /// Lyon rejected the path or tessellation parameters.
@@ -50,7 +50,7 @@ impl Error for TessellationError {}
 /// Disposable indexed CPU geometry. It is intentionally not a renderer cache
 /// or a logical scene representation.
 #[derive(Clone, Debug, PartialEq)]
-struct TessellatedGeometry {
+pub(crate) struct TessellatedGeometry {
     positions: Vec<[f32; 2]>,
     indices: Vec<u32>,
 }
@@ -62,6 +62,14 @@ impl TessellatedGeometry {
             indices: Vec::new(),
         }
     }
+
+    pub(crate) const fn positions(&self) -> &[[f32; 2]] {
+        self.positions.as_slice()
+    }
+
+    pub(crate) const fn indices(&self) -> &[u32] {
+        self.indices.as_slice()
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -70,7 +78,9 @@ enum ContourMode {
     Stroke,
 }
 
-fn tessellate_fill(shape: &SceneShape) -> Result<TessellatedGeometry, TessellationError> {
+pub(crate) fn tessellate_fill(
+    shape: &SceneShape,
+) -> Result<TessellatedGeometry, TessellationError> {
     let Some(path) = disposable_path(shape, ContourMode::Fill)? else {
         return Ok(TessellatedGeometry::empty());
     };
@@ -90,7 +100,7 @@ fn tessellate_fill(shape: &SceneShape) -> Result<TessellatedGeometry, Tessellati
     validate_buffers(buffers)
 }
 
-fn tessellate_stroke(
+pub(crate) fn tessellate_stroke(
     shape: &SceneShape,
     style: StrokeStyle,
 ) -> Result<TessellatedGeometry, TessellationError> {

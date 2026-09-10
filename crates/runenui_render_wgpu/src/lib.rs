@@ -22,10 +22,6 @@ mod resource;
     reason = "the private scene-subset module exposes explicit crate-internal sibling seams without widening the public API"
 )]
 mod scene_subset;
-#[allow(
-    dead_code,
-    reason = "the CPU tessellation substrate remains intentionally unwired until the next real-wgpu integration checkpoint"
-)]
 mod tessellation;
 
 pub use backend::clipped::{
