@@ -134,6 +134,7 @@ fn sample_gradient(coordinate_in: f32) -> vec4<f32> {
         let progress = (coordinate - previous_offset) / (current_offset - previous_offset);
         return mix(previous.premultiplied_linear, current.premultiplied_linear, progress);
     }
+    return stops[count - 1u].premultiplied_linear;
 }
 
 fn gradient_color(position: vec2<f32>) -> vec4<f32> {
