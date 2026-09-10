@@ -56,7 +56,7 @@ struct ShadeUniform {
     geometry: vec4<f32>,
     inverse_a: vec4<f32>,
     inverse_b: vec4<f32>,
-    meta: vec4<u32>,
+    brush_info: vec4<u32>,
 }
 
 struct GradientStop {
@@ -96,7 +96,7 @@ fn local_point(position: vec2<f32>) -> vec2<f32> {
 
 fn sample_gradient(coordinate_in: f32) -> vec4<f32> {
     let coordinate = clamp(coordinate_in, 0.0, 1.0);
-    let count = shade.meta.y;
+    let count = shade.brush_info.y;
     let first = stops[0u];
     let first_offset = first.offset_and_padding.x;
     if coordinate <= first_offset {
@@ -139,7 +139,7 @@ fn sample_gradient(coordinate_in: f32) -> vec4<f32> {
 fn gradient_color(position: vec2<f32>) -> vec4<f32> {
     let local = local_point(position);
     var coordinate = 0.0;
-    if shade.meta.x == 1u {
+    if shade.brush_info.x == 1u {
         let start = shade.geometry.xy;
         let direction = shade.geometry.zw - start;
         coordinate = dot(local - start, direction) / dot(direction, direction);
@@ -158,7 +158,7 @@ fn gradient_color(position: vec2<f32>) -> vec4<f32> {
 
 @fragment
 fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
-    if shade.meta.x == 0u {
+    if shade.brush_info.x == 0u {
         return shade.solid;
     }
     return gradient_color(position.xy);
