@@ -2,7 +2,9 @@ mod solid;
 
 use std::collections::HashSet;
 
-use runenui_core::{Brush, Color, LogicalSize, PaintPrimitive, ResourceKind, ResourceRef, SceneShape};
+use runenui_core::{
+    Brush, Color, LogicalSize, PaintPrimitive, ResourceKind, ResourceRef, SceneShape,
+};
 use runenui_runtime::{PaintPublication, RasterScale, SceneCapabilities, SceneClip};
 use wgpu::util::DeviceExt;
 
@@ -1136,9 +1138,9 @@ fn prepare_resource_scene(
                         semantic: UnsupportedSceneSemantic::Image,
                     }));
                 };
-                let patch_count = image_primitive.resolved_patch_count().unwrap_or_else(|| {
-                    unreachable!("resolved intrinsic metadata implies patches")
-                });
+                let patch_count = image_primitive
+                    .resolved_patch_count()
+                    .unwrap_or_else(|| unreachable!("resolved intrinsic metadata implies patches"));
                 let patches = (0..patch_count)
                     .map(|patch_index| {
                         let (source, destination) = image_primitive
@@ -1334,8 +1336,7 @@ fn encode_resource_scene_to_target(
                 clip_pipelines,
                 encoder,
                 color_view,
-                stencil_view
-                    .unwrap_or_else(|| unreachable!("solid item requires stencil target")),
+                stencil_view.unwrap_or_else(|| unreachable!("solid item requires stencil target")),
                 target_format,
                 extent,
                 canvas_extent,
