@@ -255,12 +255,7 @@ fn real_gpu_gradients_match_core_sampling_and_hard_stop_semantics() -> Result<()
     let red = Color::rgb(255, 0, 0);
     let blue = Color::rgb(0, 0, 255);
 
-    let hard_stops = gradient_stops(&[
-        (0.25, red),
-        (0.5, red),
-        (0.5, blue),
-        (0.75, Color::WHITE),
-    ]);
+    let hard_stops = gradient_stops(&[(0.25, red), (0.5, red), (0.5, blue), (0.75, Color::WHITE)]);
     let hard_gradient = LinearGradient::new(point(0.5, 0.5), point(64.5, 0.5), hard_stops)
         .unwrap_or_else(|_| unreachable!("fixture hard-stop gradient is valid"));
     let hard_item = PaintContributionItem::fill(
