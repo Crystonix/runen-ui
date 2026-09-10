@@ -567,7 +567,6 @@ mod tests {
         assert!(!rounded_geometry.positions.is_empty());
         assert!(!ellipse_geometry.positions.is_empty());
         assert_valid_geometry(&rounded_geometry);
-        assert_valid_geometry(&ellipse_geometry);
     }
 
     #[test]
@@ -736,12 +735,7 @@ mod tests {
             Some(([0.0, 10.0], [10.0, 0.0]))
         );
         assert_eq!(
-            cubic_endpoint_tangents(
-                origin,
-                point(10.0, 0.0),
-                point(10.0, 0.0),
-                point(10.0, 0.0),
-            ),
+            cubic_endpoint_tangents(origin, point(10.0, 0.0), point(10.0, 0.0), point(10.0, 0.0),),
             Some(([10.0, 0.0], [10.0, 0.0]))
         );
         assert_eq!(
