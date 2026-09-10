@@ -4,7 +4,10 @@ use core::cmp::Ordering;
 
 use crate::{
     LogicalPoint, LogicalRect, PathFillRule, PathVerb, ScenePath,
-    path::{cubic, cubic_coefficients, quadratic, quadratic_roots},
+    path::{
+        cubic, cubic_coefficients, cubic_is_point_degenerate, line_is_point_degenerate, quadratic,
+        quadratic_is_point_degenerate, quadratic_roots,
+    },
 };
 
 impl ScenePath {
@@ -12,7 +15,8 @@ impl ScenePath {
     ///
     /// Segment-bearing open contours receive the ADR 0011 synthetic straight
     /// final-to-first edge for fill only. Authored and synthetic boundaries are
-    /// inside. Non-boundary points use the authored non-zero or even-odd rule.
+    /// inside. Point-degenerate authored/synthetic segments contribute no boundary
+    /// or winding. Non-boundary points use the authored non-zero or even-odd rule.
     /// Renderer tessellation, raster scale, and dependency flattening tolerances
     /// are not inputs to this decision.
     #[must_use]
@@ -167,6 +171,10 @@ struct FillState {
 
 impl FillState {
     fn include(&mut self, segment: Segment, point: LogicalPoint) {
+        if segment.is_point_degenerate() {
+            return;
+        }
+
         let mut parameters = [0.0_f64; 6];
         let count = segment.monotonic_parameters(&mut parameters);
         for pair in parameters[..count].windows(2) {
@@ -211,6 +219,21 @@ enum Axis {
 }
 
 impl Segment {
+    fn is_point_degenerate(self) -> bool {
+        match self {
+            Self::Line { from, to } => line_is_point_degenerate(from, to),
+            Self::Quadratic { from, control, to } => {
+                quadratic_is_point_degenerate(from, control, to)
+            }
+            Self::Cubic {
+                from,
+                control1,
+                control2,
+                to,
+            } => cubic_is_point_degenerate(from, control1, control2, to),
+        }
+    }
+
     fn evaluate(self, axis: Axis, parameter: f64) -> f64 {
         let coordinate = |point: LogicalPoint| match axis {
             Axis::X => f64::from(point.x()),
@@ -465,6 +488,54 @@ mod tests {
             vec![
                 PathVerb::MoveTo(point(2.0, 3.0)),
                 PathVerb::MoveTo(point(8.0, 13.0)),
+            ],
+            PathFillRule::EvenOdd,
+        );
+        assert!(!empty.contains_fill(point(2.0, 3.0)));
+    }
+
+    #[test]
+    fn point_degenerate_segments_do_not_manufacture_fill_boundaries() {
+        let mixed = path(
+            vec![
+                PathVerb::MoveTo(point(0.0, 0.0)),
+                PathVerb::LineTo(point(10.0, 10.0)),
+                PathVerb::MoveTo(point(0.0, 10.0)),
+                PathVerb::LineTo(point(0.0, 10.0)),
+                PathVerb::QuadraticTo {
+                    control: point(0.0, 10.0),
+                    to: point(0.0, 10.0),
+                },
+                PathVerb::CubicTo {
+                    control1: point(0.0, 10.0),
+                    control2: point(0.0, 10.0),
+                    to: point(0.0, 10.0),
+                },
+                PathVerb::Close,
+            ],
+            PathFillRule::NonZero,
+        );
+
+        assert!(!mixed.contains_fill(point(0.0, 10.0)));
+        assert!(mixed.contains_fill(point(5.0, 5.0)));
+    }
+
+    #[test]
+    fn entirely_point_degenerate_closed_contour_is_coverage_empty() {
+        let empty = path(
+            vec![
+                PathVerb::MoveTo(point(2.0, 3.0)),
+                PathVerb::LineTo(point(2.0, 3.0)),
+                PathVerb::QuadraticTo {
+                    control: point(2.0, 3.0),
+                    to: point(2.0, 3.0),
+                },
+                PathVerb::CubicTo {
+                    control1: point(2.0, 3.0),
+                    control2: point(2.0, 3.0),
+                    to: point(2.0, 3.0),
+                },
+                PathVerb::Close,
             ],
             PathFillRule::EvenOdd,
         );

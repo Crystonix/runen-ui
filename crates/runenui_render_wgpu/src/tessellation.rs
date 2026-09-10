@@ -21,6 +21,9 @@ use runenui_core::{
 const TESSELLATION_TOLERANCE: f32 = 0.05;
 const HALF_PI: f32 = core::f32::consts::FRAC_PI_2;
 
+type Tangent = [f64; 2];
+type EndpointTangents = (Tangent, Tangent);
+
 /// Failure from the private neutral-to-Lyon realization adapter.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum TessellationError {
@@ -152,14 +155,14 @@ fn disposable_path(
 ) -> Result<Option<Path>, TessellationError> {
     match shape {
         SceneShape::Rect(rect) => {
-            if matches!(mode, ContourMode::Fill) && is_degenerate(*rect) {
+            if is_degenerate(*rect) {
                 Ok(None)
             } else {
                 build_rect_path(*rect).map(Some)
             }
         }
         SceneShape::RoundedRect { rect, .. } => {
-            if matches!(mode, ContourMode::Fill) && is_degenerate(*rect) {
+            if is_degenerate(*rect) {
                 Ok(None)
             } else {
                 build_rounded_rect_path(shape, *rect).map(Some)
@@ -269,6 +272,7 @@ fn build_ellipse_path(rect: LogicalRect) -> Result<Path, TessellationError> {
 fn build_scene_path(scene_path: &ScenePath, mode: ContourMode) -> Result<Path, TessellationError> {
     let mut builder = Path::builder();
     let mut contour_start = None;
+    let mut current = None;
     let mut active = false;
 
     for verb in scene_path.verbs() {
@@ -277,47 +281,53 @@ fn build_scene_path(scene_path: &ScenePath, mode: ContourMode) -> Result<Path, T
                 if active {
                     builder.end(matches!(mode, ContourMode::Fill));
                 }
-                contour_start = Some(finite_point_from_logical(to)?);
+                contour_start = Some(to);
+                current = Some(to);
                 active = false;
             }
             PathVerb::LineTo(to) => {
-                if !active {
-                    builder.begin(contour_start.ok_or(TessellationError::Lyon)?);
-                    active = true;
+                let from = current.ok_or(TessellationError::Lyon)?;
+                if line_endpoint_tangents(from, to).is_some() {
+                    begin_geometric_contour(&mut builder, &mut active, from)?;
+                    builder.line_to(finite_point_from_logical(to)?);
                 }
-                builder.line_to(finite_point_from_logical(to)?);
+                current = Some(to);
             }
             PathVerb::QuadraticTo { control, to } => {
-                if !active {
-                    builder.begin(contour_start.ok_or(TessellationError::Lyon)?);
-                    active = true;
+                let from = current.ok_or(TessellationError::Lyon)?;
+                if quadratic_endpoint_tangents(from, control, to).is_some() {
+                    begin_geometric_contour(&mut builder, &mut active, from)?;
+                    builder.quadratic_bezier_to(
+                        finite_point_from_logical(control)?,
+                        finite_point_from_logical(to)?,
+                    );
                 }
-                builder.quadratic_bezier_to(
-                    finite_point_from_logical(control)?,
-                    finite_point_from_logical(to)?,
-                );
+                current = Some(to);
             }
             PathVerb::CubicTo {
                 control1,
                 control2,
                 to,
             } => {
-                if !active {
-                    builder.begin(contour_start.ok_or(TessellationError::Lyon)?);
-                    active = true;
+                let from = current.ok_or(TessellationError::Lyon)?;
+                if cubic_endpoint_tangents(from, control1, control2, to).is_some() {
+                    begin_geometric_contour(&mut builder, &mut active, from)?;
+                    builder.cubic_bezier_to(
+                        finite_point_from_logical(control1)?,
+                        finite_point_from_logical(control2)?,
+                        finite_point_from_logical(to)?,
+                    );
                 }
-                builder.cubic_bezier_to(
-                    finite_point_from_logical(control1)?,
-                    finite_point_from_logical(control2)?,
-                    finite_point_from_logical(to)?,
-                );
+                current = Some(to);
             }
             PathVerb::Close => {
-                if !active {
-                    return Err(TessellationError::Lyon);
+                let start = contour_start.ok_or(TessellationError::Lyon)?;
+                current.ok_or(TessellationError::Lyon)?;
+                if active {
+                    builder.end(true);
+                    active = false;
                 }
-                builder.end(true);
-                active = false;
+                current = Some(start);
             }
         }
     }
@@ -326,6 +336,60 @@ fn build_scene_path(scene_path: &ScenePath, mode: ContourMode) -> Result<Path, T
         builder.end(matches!(mode, ContourMode::Fill));
     }
     Ok(builder.build())
+}
+
+fn begin_geometric_contour(
+    builder: &mut impl PathBuilder,
+    active: &mut bool,
+    from: LogicalPoint,
+) -> Result<(), TessellationError> {
+    if !*active {
+        builder.begin(finite_point_from_logical(from)?);
+        *active = true;
+    }
+    Ok(())
+}
+
+fn line_endpoint_tangents(from: LogicalPoint, to: LogicalPoint) -> Option<EndpointTangents> {
+    let tangent = chord(from, to)?;
+    Some((tangent, tangent))
+}
+
+fn quadratic_endpoint_tangents(
+    from: LogicalPoint,
+    control: LogicalPoint,
+    to: LogicalPoint,
+) -> Option<EndpointTangents> {
+    let start = chord(from, control).or_else(|| chord(from, to))?;
+    let end = chord(control, to).or_else(|| chord(from, to))?;
+    Some((start, end))
+}
+
+fn cubic_endpoint_tangents(
+    from: LogicalPoint,
+    control1: LogicalPoint,
+    control2: LogicalPoint,
+    to: LogicalPoint,
+) -> Option<EndpointTangents> {
+    let start = chord(from, control1)
+        .or_else(|| chord(from, control2))
+        .or_else(|| chord(from, to))?;
+    let end = chord(control2, to)
+        .or_else(|| chord(control1, to))
+        .or_else(|| chord(from, to))?;
+    Some((start, end))
+}
+
+fn chord(from: LogicalPoint, to: LogicalPoint) -> Option<Tangent> {
+    let tangent = [
+        f64::from(to.x()) - f64::from(from.x()),
+        f64::from(to.y()) - f64::from(from.y()),
+    ];
+    if tangent == [0.0, 0.0] {
+        None
+    } else {
+        Some(tangent)
+    }
 }
 
 fn append_arc(
@@ -438,8 +502,9 @@ mod tests {
     };
 
     use super::{
-        ContourMode, TessellatedGeometry, build_scene_path, fill_options, path_fill_rule,
-        stroke_cap, stroke_join, stroke_options, tessellate_fill, tessellate_stroke,
+        ContourMode, TessellatedGeometry, build_scene_path, cubic_endpoint_tangents, fill_options,
+        line_endpoint_tangents, path_fill_rule, quadratic_endpoint_tangents, stroke_cap,
+        stroke_join, stroke_options, tessellate_fill, tessellate_stroke,
     };
 
     fn rect(width: f32, height: f32) -> LogicalRect {
@@ -516,6 +581,23 @@ mod tests {
     }
 
     #[test]
+    fn zero_extent_rectangle_family_strokes_are_empty() {
+        let radius = Radius::all(length(3.0));
+        for shape in [
+            SceneShape::rect(rect(0.0, 10.0)),
+            SceneShape::rect(rect(10.0, 0.0)),
+            SceneShape::rounded_rect(rect(0.0, 10.0), radius),
+            SceneShape::rounded_rect(rect(10.0, 0.0), radius),
+        ] {
+            assert_eq!(
+                tessellate_stroke(&shape, StrokeStyle::new(length(2.0)))
+                    .unwrap_or_else(|_| unreachable!("degenerate stroke is handled")),
+                TessellatedGeometry::empty()
+            );
+        }
+    }
+
+    #[test]
     fn path_with_line_quadratic_and_cubic_tessellates() {
         let shape = path(
             vec![
@@ -541,6 +623,208 @@ mod tests {
         assert!(!stroke.positions.is_empty());
         assert_valid_geometry(&fill);
         assert_valid_geometry(&stroke);
+    }
+
+    #[test]
+    fn entirely_point_degenerate_structural_contour_is_empty() {
+        let at = point(4.0, 5.0);
+        let shape = path(
+            vec![
+                PathVerb::MoveTo(at),
+                PathVerb::LineTo(at),
+                PathVerb::QuadraticTo {
+                    control: at,
+                    to: at,
+                },
+                PathVerb::CubicTo {
+                    control1: at,
+                    control2: at,
+                    to: at,
+                },
+                PathVerb::Close,
+            ],
+            PathFillRule::NonZero,
+        );
+        assert_eq!(
+            tessellate_fill(&shape).unwrap_or_else(|_| unreachable!("empty fill is handled")),
+            TessellatedGeometry::empty()
+        );
+        assert_eq!(
+            tessellate_stroke(&shape, StrokeStyle::new(length(2.0)))
+                .unwrap_or_else(|_| unreachable!("empty stroke is handled")),
+            TessellatedGeometry::empty()
+        );
+    }
+
+    #[test]
+    fn point_degenerate_segments_are_skipped_without_changing_contour_closure() {
+        let open = ScenePath::new(
+            vec![
+                PathVerb::MoveTo(point(0.0, 0.0)),
+                PathVerb::LineTo(point(0.0, 0.0)),
+                PathVerb::LineTo(point(10.0, 0.0)),
+                PathVerb::QuadraticTo {
+                    control: point(10.0, 0.0),
+                    to: point(10.0, 0.0),
+                },
+                PathVerb::LineTo(point(10.0, 10.0)),
+            ],
+            PathFillRule::NonZero,
+        )
+        .unwrap_or_else(|_| unreachable!("test path is valid"));
+        let open_events = build_scene_path(&open, ContourMode::Stroke)
+            .unwrap_or_else(|_| unreachable!("open path converts"))
+            .iter()
+            .collect::<Vec<_>>();
+        assert_eq!(open_events.len(), 4);
+        assert!(matches!(open_events.first(), Some(Event::Begin { .. })));
+        assert!(matches!(open_events[1], Event::Line { .. }));
+        assert!(matches!(open_events[2], Event::Line { .. }));
+        assert!(matches!(
+            open_events.last(),
+            Some(Event::End { close: false, .. })
+        ));
+
+        let closed = ScenePath::new(
+            vec![
+                PathVerb::MoveTo(point(0.0, 0.0)),
+                PathVerb::LineTo(point(0.0, 0.0)),
+                PathVerb::LineTo(point(10.0, 0.0)),
+                PathVerb::LineTo(point(10.0, 10.0)),
+                PathVerb::Close,
+            ],
+            PathFillRule::NonZero,
+        )
+        .unwrap_or_else(|_| unreachable!("test path is valid"));
+        let closed_events = build_scene_path(&closed, ContourMode::Stroke)
+            .unwrap_or_else(|_| unreachable!("closed path converts"))
+            .iter()
+            .collect::<Vec<_>>();
+        assert_eq!(closed_events.len(), 4);
+        assert!(matches!(
+            closed_events.last(),
+            Some(Event::End { close: true, .. })
+        ));
+    }
+
+    #[test]
+    fn limiting_endpoint_tangents_follow_polynomial_control_order() {
+        let origin = point(0.0, 0.0);
+        assert_eq!(
+            line_endpoint_tangents(origin, point(2.0, 3.0)),
+            Some(([2.0, 3.0], [2.0, 3.0]))
+        );
+        assert_eq!(
+            quadratic_endpoint_tangents(origin, origin, point(10.0, 0.0)),
+            Some(([10.0, 0.0], [10.0, 0.0]))
+        );
+        assert_eq!(
+            cubic_endpoint_tangents(
+                origin,
+                origin,
+                point(0.0, 10.0),
+                point(10.0, 10.0),
+            ),
+            Some(([0.0, 10.0], [10.0, 0.0]))
+        );
+        assert_eq!(
+            cubic_endpoint_tangents(origin, origin, origin, origin),
+            None
+        );
+    }
+
+    #[test]
+    fn zero_derivative_cubic_endpoint_caps_follow_limiting_tangents() {
+        let shape = path(
+            vec![
+                PathVerb::MoveTo(point(0.0, 0.0)),
+                PathVerb::CubicTo {
+                    control1: point(0.0, 0.0),
+                    control2: point(0.0, 10.0),
+                    to: point(10.0, 10.0),
+                },
+            ],
+            PathFillRule::NonZero,
+        );
+        let geometry = tessellate_stroke(
+            &shape,
+            StrokeStyle::new(length(2.0)).with_cap(StrokeCap::Square),
+        )
+        .unwrap_or_else(|_| unreachable!("curve stroke tessellates"));
+        assert_valid_geometry(&geometry);
+        let min_y = geometry
+            .positions
+            .iter()
+            .map(|position| position[1])
+            .fold(f32::INFINITY, f32::min);
+        let max_x = geometry
+            .positions
+            .iter()
+            .map(|position| position[0])
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!(min_y <= -0.9, "start cap must extend against vertical limiting tangent");
+        assert!(max_x >= 10.9, "end cap must extend along horizontal limiting tangent");
+    }
+
+    #[test]
+    fn miter_limit_falls_back_to_bevel_for_over_limit_join() {
+        let shape = path(
+            vec![
+                PathVerb::MoveTo(point(0.0, 0.0)),
+                PathVerb::LineTo(point(10.0, 0.0)),
+                PathVerb::LineTo(point(10.0, 10.0)),
+            ],
+            PathFillRule::NonZero,
+        );
+        let limited = tessellate_stroke(
+            &shape,
+            StrokeStyle::new(length(2.0))
+                .with_join(StrokeJoin::Miter)
+                .with_miter_limit(1.0)
+                .unwrap_or_else(|_| unreachable!("miter limit is valid")),
+        )
+        .unwrap_or_else(|_| unreachable!("limited miter tessellates"));
+        let generous = tessellate_stroke(
+            &shape,
+            StrokeStyle::new(length(2.0))
+                .with_join(StrokeJoin::Miter)
+                .with_miter_limit(4.0)
+                .unwrap_or_else(|_| unreachable!("miter limit is valid")),
+        )
+        .unwrap_or_else(|_| unreachable!("generous miter tessellates"));
+        let limited_extent = limited
+            .positions
+            .iter()
+            .map(|position| position[0] - position[1])
+            .fold(f32::NEG_INFINITY, f32::max);
+        let generous_extent = generous
+            .positions
+            .iter()
+            .map(|position| position[0] - position[1])
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!(limited_extent <= 11.1);
+        assert!(generous_extent >= 11.9);
+    }
+
+    #[test]
+    fn nondegenerate_one_dimensional_curve_stroke_remains_real_geometry() {
+        let shape = path(
+            vec![
+                PathVerb::MoveTo(point(0.0, 0.0)),
+                PathVerb::QuadraticTo {
+                    control: point(0.0, 0.0),
+                    to: point(10.0, 0.0),
+                },
+            ],
+            PathFillRule::NonZero,
+        );
+        let geometry = tessellate_stroke(
+            &shape,
+            StrokeStyle::new(length(2.0)).with_cap(StrokeCap::Square),
+        )
+        .unwrap_or_else(|_| unreachable!("one-dimensional curve tessellates"));
+        assert!(!geometry.positions.is_empty());
+        assert_valid_geometry(&geometry);
     }
 
     #[test]

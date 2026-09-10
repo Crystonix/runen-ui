@@ -186,11 +186,12 @@ fn stroke_shape_bounds(shape: &SceneShape, style: StrokeStyle) -> PaintSceneBoun
     }
 
     let centerline = match shape {
-        SceneShape::Rect(rect) | SceneShape::RoundedRect { rect, .. } => *rect,
-        SceneShape::Ellipse(rect) => {
+        SceneShape::Rect(rect)
+        | SceneShape::RoundedRect { rect, .. }
+        | SceneShape::Ellipse(rect) => {
             if rect.width() == 0.0 || rect.height() == 0.0 {
-                // ADR 0011 makes zero-extent ellipse fill/hit coverage empty and does not
-                // define a degenerate ellipse boundary for centered stroke coverage.
+                // ADR 0014 preserves zero-extent rectangle-family stroke emptiness;
+                // ADR 0011 already owns the equivalent ellipse rule.
                 return PaintSceneBounds::Empty;
             }
             *rect
@@ -382,7 +383,7 @@ fn checked_f32_up(value: f64) -> Option<f32> {
 mod tests {
     use runenui_core::{
         Brush, Color, ImageIntrinsicSize, ImagePrimitive, LogicalLength, LogicalPoint, LogicalRect,
-        LogicalTransform, PaintPrimitive, PathFillRule, PathVerb, ResourceKind, ResourceRef,
+        LogicalTransform, PaintPrimitive, PathFillRule, PathVerb, Radius, ResourceKind, ResourceRef,
         SceneLayer, SceneOpacity, ScenePath, SceneShape, ShapedTextRunPrimitive, StrokeCap,
         StrokeJoin, StrokeStyle,
     };
@@ -546,23 +547,55 @@ mod tests {
     }
 
     #[test]
-    fn positive_stroke_keeps_degenerate_rect_boundary_coverage() {
+    fn zero_extent_rectangle_family_strokes_are_empty() {
+        let radius = Radius::all(
+            LogicalLength::new(3.0).unwrap_or_else(|_| unreachable!("test radius is valid")),
+        );
+        for shape in [
+            SceneShape::rect(rect(4.0, 5.0, 0.0, 10.0)),
+            SceneShape::rect(rect(4.0, 5.0, 10.0, 0.0)),
+            SceneShape::rounded_rect(rect(4.0, 5.0, 0.0, 10.0), radius),
+            SceneShape::rounded_rect(rect(4.0, 5.0, 10.0, 0.0), radius),
+        ] {
+            let item = scene_item(
+                PaintPrimitive::Stroke {
+                    shape,
+                    brush: Brush::solid(Color::BLACK),
+                    style: StrokeStyle::new(
+                        LogicalLength::new(2.0).unwrap_or_else(|_| unreachable!()),
+                    ),
+                },
+                LogicalTransform::IDENTITY,
+                Vec::new(),
+            );
+            assert_eq!(
+                scene(vec![item]).item_bounds(0),
+                Some(PaintSceneBounds::Empty)
+            );
+        }
+    }
+
+    #[test]
+    fn point_degenerate_path_stroke_is_empty() {
+        let at = LogicalPoint::new(4.0, 5.0).unwrap_or_else(|_| unreachable!());
+        let path = ScenePath::new(
+            vec![PathVerb::MoveTo(at), PathVerb::LineTo(at), PathVerb::Close],
+            PathFillRule::NonZero,
+        )
+        .unwrap_or_else(|_| unreachable!("point-degenerate segment is structurally valid"));
         let item = scene_item(
             PaintPrimitive::Stroke {
-                shape: SceneShape::rect(rect(4.0, 5.0, 0.0, 10.0)),
+                shape: SceneShape::path(path),
                 brush: Brush::solid(Color::BLACK),
                 style: StrokeStyle::new(LogicalLength::new(2.0).unwrap_or_else(|_| unreachable!())),
             },
             LogicalTransform::IDENTITY,
             Vec::new(),
         );
-        let Some(PaintSceneBounds::Finite(bounds)) = scene(vec![item]).item_bounds(0) else {
-            unreachable!("degenerate rectangle stroke must retain its finite boundary");
-        };
-        assert!(bounds.x() <= 3.0);
-        assert!(bounds.max_x() >= 5.0);
-        assert!(bounds.y() <= 4.0);
-        assert!(bounds.max_y() >= 16.0);
+        assert_eq!(
+            scene(vec![item]).item_bounds(0),
+            Some(PaintSceneBounds::Empty)
+        );
     }
 
     #[test]

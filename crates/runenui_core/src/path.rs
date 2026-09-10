@@ -75,9 +75,11 @@ impl Error for ScenePathError {}
 ///
 /// Identity/equality is structural path content plus fill rule. Shared storage is
 /// an implementation detail and never participates in scene identity. Move-only
-/// contours are valid but have no coverage. Open segment-bearing contours remain
-/// structurally open: ADR 0011's synthetic closing edge exists only during fill
-/// evaluation and is never inserted into authored path content.
+/// contours are valid but have no coverage. Point-degenerate authored segments
+/// remain structural identity/validation facts but contribute no geometry. Open
+/// segment-bearing contours remain structurally open: ADR 0011's synthetic closing
+/// edge exists only during fill evaluation and is never inserted into authored path
+/// content.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScenePath {
     verbs: Arc<[PathVerb]>,
@@ -118,8 +120,9 @@ impl ScenePath {
         self.fill_rule
     }
 
-    /// Returns deterministic conservative segment bounds when at least one authored
-    /// segment exists. Empty/move-only paths return `None`.
+    /// Returns deterministic conservative bounds when at least one authored
+    /// segment contributes geometry. Empty, move-only, and entirely point-degenerate
+    /// paths return `None`.
     #[must_use]
     pub const fn logical_bounds(&self) -> Option<LogicalRect> {
         self.logical_bounds
@@ -165,6 +168,27 @@ fn validate_verbs(verbs: &[PathVerb]) -> Result<(), ScenePathError> {
         }
     }
     Ok(())
+}
+
+pub(crate) fn line_is_point_degenerate(from: LogicalPoint, to: LogicalPoint) -> bool {
+    from == to
+}
+
+pub(crate) fn quadratic_is_point_degenerate(
+    from: LogicalPoint,
+    control: LogicalPoint,
+    to: LogicalPoint,
+) -> bool {
+    from == control && control == to
+}
+
+pub(crate) fn cubic_is_point_degenerate(
+    from: LogicalPoint,
+    control1: LogicalPoint,
+    control2: LogicalPoint,
+    to: LogicalPoint,
+) -> bool {
+    from == control1 && control1 == control2 && control2 == to
 }
 
 #[derive(Clone, Copy)]
@@ -289,6 +313,9 @@ fn ensure_bounds(bounds: &mut Option<Bounds>, point: LogicalPoint) -> &mut Bound
 }
 
 fn include_line(bounds: &mut Option<Bounds>, from: LogicalPoint, to: LogicalPoint) {
+    if line_is_point_degenerate(from, to) {
+        return;
+    }
     let bounds = ensure_bounds(bounds, from);
     bounds.include(f64::from(to.x()), f64::from(to.y()));
 }
@@ -299,6 +326,9 @@ fn include_quadratic(
     control: LogicalPoint,
     to: LogicalPoint,
 ) {
+    if quadratic_is_point_degenerate(from, control, to) {
+        return;
+    }
     include_line(bounds, from, to);
     let bounds = ensure_bounds(bounds, from);
 
@@ -346,7 +376,11 @@ fn include_cubic(
     control2: LogicalPoint,
     to: LogicalPoint,
 ) {
+    if cubic_is_point_degenerate(from, control1, control2, to) {
+        return;
+    }
     include_line(bounds, from, to);
+    let _ = ensure_bounds(bounds, from);
 
     for axis in 0..2 {
         let (p0, p1, p2, p3) = match axis {
@@ -487,6 +521,68 @@ mod tests {
         .unwrap_or_else(|_| unreachable!("move-only path is valid"));
         assert!(path.logical_bounds().is_none());
         assert!(path.is_coverage_empty());
+    }
+
+    #[test]
+    fn point_degenerate_segments_remain_structural_but_are_coverage_empty() {
+        let verbs = vec![
+            PathVerb::MoveTo(point(2.0, 3.0)),
+            PathVerb::LineTo(point(2.0, 3.0)),
+            PathVerb::QuadraticTo {
+                control: point(2.0, 3.0),
+                to: point(2.0, 3.0),
+            },
+            PathVerb::CubicTo {
+                control1: point(2.0, 3.0),
+                control2: point(2.0, 3.0),
+                to: point(2.0, 3.0),
+            },
+            PathVerb::Close,
+        ];
+        let path = ScenePath::new(verbs.clone(), PathFillRule::NonZero)
+            .unwrap_or_else(|_| unreachable!("degenerate segments remain structurally valid"));
+
+        assert_eq!(path.verbs(), verbs.as_slice());
+        assert!(path.logical_bounds().is_none());
+        assert!(path.is_coverage_empty());
+    }
+
+    #[test]
+    fn nondegenerate_one_dimensional_curves_retain_geometry() {
+        let path = ScenePath::new(
+            vec![
+                PathVerb::MoveTo(point(0.0, 0.0)),
+                PathVerb::QuadraticTo {
+                    control: point(0.0, 0.0),
+                    to: point(10.0, 0.0),
+                },
+                PathVerb::CubicTo {
+                    control1: point(10.0, 0.0),
+                    control2: point(20.0, 0.0),
+                    to: point(20.0, 0.0),
+                },
+            ],
+            PathFillRule::NonZero,
+        )
+        .unwrap_or_else(|_| unreachable!("one-dimensional curves remain valid geometry"));
+
+        let bounds = path
+            .logical_bounds()
+            .unwrap_or_else(|| unreachable!("nondegenerate curves retain finite bounds"));
+        assert_eq!(
+            (
+                bounds.x().to_bits(),
+                bounds.y().to_bits(),
+                bounds.width().to_bits(),
+                bounds.height().to_bits(),
+            ),
+            (
+                0.0_f32.to_bits(),
+                0.0_f32.to_bits(),
+                20.0_f32.to_bits(),
+                0.0_f32.to_bits(),
+            )
+        );
     }
 
     #[test]
