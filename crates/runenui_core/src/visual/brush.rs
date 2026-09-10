@@ -136,6 +136,19 @@ impl GradientStops {
     pub fn as_slice(&self) -> &[GradientStop] {
         self.0.as_ref()
     }
+
+    /// Samples the accepted gradient-stop function at one normalized coordinate.
+    ///
+    /// Outside the authored first/last stop range the corresponding endpoint color
+    /// is extended. At an exact shared-offset hard stop the first authored color at
+    /// that coordinate is the boundary value; immediately on the increasing side,
+    /// the last authored color at that offset becomes the interpolation source.
+    /// Interpolation is premultiplied linear-sRGB and is deterministically converted
+    /// back to straight-alpha sRGB8.
+    #[must_use]
+    pub fn sample(&self, coordinate: UnitInterval) -> Color {
+        sample_gradient_stops(self.as_slice(), f64::from(coordinate.get()))
+    }
 }
 
 /// Geometry failure for an accepted gradient.
@@ -200,6 +213,21 @@ impl LinearGradient {
     pub const fn stops(&self) -> &GradientStops {
         &self.stops
     }
+
+    /// Samples this gradient at one primitive-local logical point.
+    #[must_use]
+    pub fn sample_at(&self, point: LogicalPoint) -> Color {
+        let start_x = f64::from(self.start.x());
+        let start_y = f64::from(self.start.y());
+        let direction_x = f64::from(self.end.x()) - start_x;
+        let direction_y = f64::from(self.end.y()) - start_y;
+        let point_x = f64::from(point.x()) - start_x;
+        let point_y = f64::from(point.y()) - start_y;
+        let denominator = direction_x * direction_x + direction_y * direction_y;
+        let coordinate = ((point_x * direction_x + point_y * direction_y) / denominator)
+            .clamp(0.0, 1.0);
+        sample_gradient_stops(self.stops.as_slice(), coordinate)
+    }
 }
 
 /// Primitive-local concentric radial gradient.
@@ -248,6 +276,15 @@ impl RadialGradient {
     pub const fn stops(&self) -> &GradientStops {
         &self.stops
     }
+
+    /// Samples this gradient at one primitive-local logical point.
+    #[must_use]
+    pub fn sample_at(&self, point: LogicalPoint) -> Color {
+        let offset_x = f64::from(point.x()) - f64::from(self.center.x());
+        let offset_y = f64::from(point.y()) - f64::from(self.center.y());
+        let coordinate = (offset_x.hypot(offset_y) / f64::from(self.radius.get())).clamp(0.0, 1.0);
+        sample_gradient_stops(self.stops.as_slice(), coordinate)
+    }
 }
 
 /// RunenUI-owned initial brush vocabulary.
@@ -267,12 +304,106 @@ impl Brush {
     pub const fn solid(color: Color) -> Self {
         Self::Solid(color)
     }
+
+    /// Samples this brush at one primitive-local logical point.
+    #[must_use]
+    pub fn sample_at(&self, point: LogicalPoint) -> Color {
+        match self {
+            Self::Solid(color) => *color,
+            Self::Linear(gradient) => gradient.sample_at(point),
+            Self::Radial(gradient) => gradient.sample_at(point),
+        }
+    }
 }
 
 impl From<Color> for Brush {
     fn from(color: Color) -> Self {
         Self::Solid(color)
     }
+}
+
+fn sample_gradient_stops(stops: &[GradientStop], coordinate: f64) -> Color {
+    let first = stops[0];
+    let first_offset = f64::from(first.offset().get());
+    if coordinate <= first_offset {
+        return first.color();
+    }
+
+    for (index, stop) in stops.iter().copied().enumerate().skip(1) {
+        let stop_offset = f64::from(stop.offset().get());
+        if coordinate > stop_offset {
+            continue;
+        }
+        if coordinate == stop_offset {
+            let mut first_equal = index;
+            while first_equal > 0
+                && stops[first_equal - 1].offset().get() == stop.offset().get()
+            {
+                first_equal -= 1;
+            }
+            return stops[first_equal].color();
+        }
+
+        let previous = stops[index - 1];
+        let previous_offset = f64::from(previous.offset().get());
+        let progress = (coordinate - previous_offset) / (stop_offset - previous_offset);
+        return interpolate_color(previous.color(), stop.color(), progress);
+    }
+
+    stops[stops.len() - 1].color()
+}
+
+fn interpolate_color(start: Color, end: Color, progress: f64) -> Color {
+    let start = premultiplied_linear(start);
+    let end = premultiplied_linear(end);
+    let interpolated = start
+        .into_iter()
+        .zip(end)
+        .map(|(start, end)| (end - start).mul_add(progress, start))
+        .collect::<Vec<_>>();
+    let alpha = interpolated[3].clamp(0.0, 1.0);
+    if alpha <= 0.0 {
+        return Color::TRANSPARENT;
+    }
+    Color::rgba(
+        linear_to_srgb8(interpolated[0] / alpha),
+        linear_to_srgb8(interpolated[1] / alpha),
+        linear_to_srgb8(interpolated[2] / alpha),
+        unit_to_u8(alpha),
+    )
+}
+
+fn premultiplied_linear(color: Color) -> [f64; 4] {
+    let alpha = f64::from(color.alpha()) / 255.0;
+    [
+        srgb8_to_linear(color.red()) * alpha,
+        srgb8_to_linear(color.green()) * alpha,
+        srgb8_to_linear(color.blue()) * alpha,
+        alpha,
+    ]
+}
+
+fn srgb8_to_linear(channel: u8) -> f64 {
+    let srgb = f64::from(channel) / 255.0;
+    if srgb <= 0.040_45 {
+        srgb / 12.92
+    } else {
+        ((srgb + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn linear_to_srgb8(linear: f64) -> u8 {
+    let linear = linear.clamp(0.0, 1.0);
+    let srgb = if linear <= 0.003_130_8 {
+        linear * 12.92
+    } else {
+        1.055 * linear.powf(1.0 / 2.4) - 0.055
+    };
+    unit_to_u8(srgb)
+}
+
+fn unit_to_u8(value: f64) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 #[cfg(test)]
@@ -334,5 +465,72 @@ mod tests {
             Err(GradientGeometryError::ZeroRadialRadius)
         );
         assert_eq!(Brush::from(Color::BLACK), Brush::Solid(Color::BLACK));
+    }
+
+    #[test]
+    fn gradient_sampling_uses_linear_srgb_not_straight_srgb() {
+        assert_eq!(stops().sample(UnitInterval::HALF), Color::rgb(188, 188, 188));
+    }
+
+    #[test]
+    fn gradient_sampling_interpolates_premultiplied_alpha() {
+        let stops = GradientStops::new(vec![
+            GradientStop::new(UnitInterval::ZERO, Color::rgb(255, 0, 0)),
+            GradientStop::new(UnitInterval::ONE, Color::rgba(0, 0, 255, 0)),
+        ])
+        .unwrap_or_else(|_| unreachable!("test stops are valid"));
+        assert_eq!(
+            stops.sample(UnitInterval::HALF),
+            Color::rgba(255, 0, 0, 128)
+        );
+    }
+
+    #[test]
+    fn hard_stop_boundary_and_increasing_side_are_stable() {
+        let half = UnitInterval::HALF;
+        let hard = GradientStops::new(vec![
+            GradientStop::new(UnitInterval::ZERO, Color::BLACK),
+            GradientStop::new(half, Color::rgb(255, 0, 0)),
+            GradientStop::new(half, Color::rgb(0, 0, 255)),
+            GradientStop::new(UnitInterval::ONE, Color::WHITE),
+        ])
+        .unwrap_or_else(|_| unreachable!("test hard stops are valid"));
+        assert_eq!(hard.sample(half), Color::rgb(255, 0, 0));
+        let increasing = hard.sample(
+            UnitInterval::new(0.500_001)
+                .unwrap_or_else(|_| unreachable!("test coordinate is valid")),
+        );
+        assert!(increasing.red() < 5);
+        assert!(increasing.green() < 5);
+        assert!(increasing.blue() > 250);
+    }
+
+    #[test]
+    fn endpoint_extension_and_primitive_local_geometry_are_authoritative() {
+        let quarter = UnitInterval::new(0.25)
+            .unwrap_or_else(|_| unreachable!("quarter coordinate is valid"));
+        let three_quarters = UnitInterval::new(0.75)
+            .unwrap_or_else(|_| unreachable!("three-quarter coordinate is valid"));
+        let stops = GradientStops::new(vec![
+            GradientStop::new(quarter, Color::rgb(255, 0, 0)),
+            GradientStop::new(three_quarters, Color::rgb(0, 0, 255)),
+        ])
+        .unwrap_or_else(|_| unreachable!("test stops are valid"));
+        assert_eq!(stops.sample(UnitInterval::ZERO), Color::rgb(255, 0, 0));
+        assert_eq!(stops.sample(UnitInterval::ONE), Color::rgb(0, 0, 255));
+
+        let linear = LinearGradient::new(point(0.0, 0.0), point(10.0, 0.0), stops.clone())
+            .unwrap_or_else(|_| unreachable!("test linear gradient is valid"));
+        assert_eq!(linear.sample_at(point(-5.0, 0.0)), Color::rgb(255, 0, 0));
+        assert_eq!(linear.sample_at(point(15.0, 0.0)), Color::rgb(0, 0, 255));
+
+        let radial = RadialGradient::new(
+            point(4.0, 4.0),
+            LogicalLength::new(8.0).unwrap_or_else(|_| unreachable!("radius is valid")),
+            stops,
+        )
+        .unwrap_or_else(|_| unreachable!("test radial gradient is valid"));
+        assert_eq!(radial.sample_at(point(4.0, 4.0)), Color::rgb(255, 0, 0));
+        assert_eq!(radial.sample_at(point(20.0, 4.0)), Color::rgb(0, 0, 255));
     }
 }
