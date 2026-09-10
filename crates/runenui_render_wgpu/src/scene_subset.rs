@@ -5,7 +5,6 @@ use runenui_runtime::PaintSceneItem;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum UnsupportedSceneSemantic {
-    NonSolidBrush,
     Image,
     UnknownPrimitive,
     EllipseClip,
