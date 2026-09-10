@@ -8,10 +8,11 @@ use std::{
 };
 
 use runenui_core::{
-    Brush, Color, ContributionClip, Element, LogicalLength, LogicalPoint, LogicalRect, LogicalSize,
-    LogicalTransform, NoHostProtocol, PaintContribution, PaintContributionContext,
-    PaintContributionItem, PathFillRule, PathVerb, ResourceRef, ScenePath, SceneShape, StrokeCap,
-    StrokeJoin, StrokeStyle, StyleEnvironment, UiApp, Widget, WidgetMeasure,
+    Brush, Color, ContributionClip, Element, GradientStop, GradientStops, LinearGradient,
+    LogicalLength, LogicalPoint, LogicalRect, LogicalSize, LogicalTransform, NoHostProtocol,
+    PaintContribution, PaintContributionContext, PaintContributionItem, PathFillRule, PathVerb,
+    RadialGradient, ResourceRef, ScenePath, SceneShape, StrokeCap, StrokeJoin, StrokeStyle,
+    StyleEnvironment, UiApp, UnitInterval, Widget, WidgetMeasure,
 };
 use runenui_render_wgpu::{
     BackendSelection, PublicationUpdateMode, Renderer, RendererInitError, RendererOptions,
@@ -96,6 +97,22 @@ fn path(verbs: Vec<PathVerb>) -> SceneShape {
         ScenePath::new(verbs, PathFillRule::NonZero)
             .unwrap_or_else(|_| unreachable!("fixture path is structurally valid")),
     )
+}
+
+fn gradient_stops(entries: &[(f32, Color)]) -> GradientStops {
+    GradientStops::new(
+        entries
+            .iter()
+            .map(|(offset, color)| {
+                GradientStop::new(
+                    UnitInterval::new(*offset)
+                        .unwrap_or_else(|_| unreachable!("fixture stop offset is valid")),
+                    *color,
+                )
+            })
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|_| unreachable!("fixture gradient stops are valid"))
 }
 
 fn publication(items: Vec<PaintContributionItem>) -> PaintPublication {
@@ -227,6 +244,168 @@ fn real_gpu_self_overlap_is_one_source_and_rebuilds_after_target_loss() -> Resul
     assert_ne!(rebuilt.target_generation(), first_generation);
     assert_eq!(rebuilt.readback().rgba8_srgb(), first_pixels);
     Ok(())
+}
+
+#[test]
+fn real_gpu_gradients_match_core_sampling_and_hard_stop_semantics() -> Result<(), Box<dyn Error>> {
+    let Some(mut renderer) = renderer_or_adapterless()? else {
+        return Ok(());
+    };
+    let provider = NoResources;
+    let red = Color::rgb(255, 0, 0);
+    let blue = Color::rgb(0, 0, 255);
+
+    let hard_stops = gradient_stops(&[(0.0, Color::BLACK), (0.5, red), (0.5, blue), (1.0, Color::WHITE)]);
+    let hard_gradient = LinearGradient::new(point(0.5, 0.5), point(64.5, 0.5), hard_stops)
+        .unwrap_or_else(|_| unreachable!("fixture hard-stop gradient is valid"));
+    let hard_item = PaintContributionItem::fill(
+        SceneShape::rect(rect(0.0, 0.0, 64.0, 12.0)),
+        Brush::Linear(hard_gradient.clone()),
+    );
+
+    let radial_gradient = RadialGradient::new(
+        point(48.5, 28.5),
+        LogicalLength::new(8.0)?,
+        gradient_stops(&[(0.0, Color::BLACK), (1.0, Color::WHITE)]),
+    )
+    .unwrap_or_else(|_| unreachable!("fixture radial gradient is valid"));
+    let radial_item = PaintContributionItem::fill(
+        SceneShape::rect(rect(36.0, 16.0, 24.0, 24.0)),
+        Brush::Radial(radial_gradient.clone()),
+    );
+
+    let alpha_gradient = LinearGradient::new(
+        point(0.5, 20.5),
+        point(32.5, 20.5),
+        gradient_stops(&[
+            (0.0, Color::rgb(255, 0, 0)),
+            (1.0, Color::rgba(0, 0, 255, 0)),
+        ]),
+    )
+    .unwrap_or_else(|_| unreachable!("fixture alpha gradient is valid"));
+    let alpha_item = PaintContributionItem::fill(
+        SceneShape::rect(rect(0.0, 16.0, 32.0, 12.0)),
+        Brush::Linear(alpha_gradient),
+    );
+
+    let publication = publication(vec![hard_item, alpha_item, radial_item]);
+    let output = renderer.render_offscreen_publication(&publication, &provider)?;
+    let readback = output.readback();
+
+    assert_pixel_near(
+        pixel(readback, 8, 4),
+        color_bytes(hard_gradient.sample_at(point(8.5, 4.5))),
+        1,
+    );
+    assert_eq!(
+        pixel(readback, 32, 4),
+        color_bytes(red),
+        "the exact hard-stop coordinate keeps the first authored boundary color"
+    );
+    assert_pixel_near(
+        pixel(readback, 33, 4),
+        color_bytes(hard_gradient.sample_at(point(33.5, 4.5))),
+        1,
+    );
+
+    assert_eq!(pixel(readback, 48, 28), color_bytes(Color::BLACK));
+    assert_eq!(pixel(readback, 56, 28), color_bytes(Color::WHITE));
+    assert_pixel_near(
+        pixel(readback, 52, 28),
+        color_bytes(radial_gradient.sample_at(point(52.5, 28.5))),
+        1,
+    );
+
+    let midpoint = pixel(readback, 16, 20);
+    assert!(
+        midpoint[3].abs_diff(128) <= 1,
+        "premultiplied alpha midpoint must remain half-alpha, got {}",
+        midpoint[3]
+    );
+    assert!(
+        midpoint[0] >= 186 && midpoint[0] <= 189,
+        "opaque-red contribution over transparent target should store half linear red, got {}",
+        midpoint[0]
+    );
+    assert_eq!(
+        midpoint[2], 0,
+        "transparent blue must not leak color through premultiplied interpolation"
+    );
+    Ok(())
+}
+
+#[test]
+fn real_gpu_gradient_transform_clip_stroke_and_rebuild_are_deterministic()
+-> Result<(), Box<dyn Error>> {
+    let Some(mut renderer) = renderer_or_adapterless()? else {
+        return Ok(());
+    };
+    let provider = NoResources;
+    let stops = gradient_stops(&[(0.0, Color::BLACK), (1.0, Color::WHITE)]);
+    let fill_gradient = LinearGradient::new(point(0.5, 0.5), point(24.5, 0.5), stops.clone())
+        .unwrap_or_else(|_| unreachable!("fixture transformed gradient is valid"));
+    let transformed = PaintContributionItem::fill(
+        SceneShape::rect(rect(0.0, 0.0, 24.0, 12.0)),
+        Brush::Linear(fill_gradient.clone()),
+    )
+    .with_transform(LogicalTransform::translation(8.0, 32.0)?)
+    .with_clip(ContributionClip::identity(SceneShape::rect(rect(
+        16.0, 30.0, 12.0, 16.0,
+    ))));
+
+    let stroke_gradient = LinearGradient::new(point(36.5, 40.5), point(60.5, 40.5), stops)
+        .unwrap_or_else(|_| unreachable!("fixture stroke gradient is valid"));
+    let stroke = PaintContributionItem::stroke(
+        path(vec![
+            PathVerb::MoveTo(point(36.0, 40.0)),
+            PathVerb::LineTo(point(60.0, 40.0)),
+        ]),
+        Brush::Linear(stroke_gradient.clone()),
+        StrokeStyle::new(LogicalLength::new(4.0)?).with_cap(StrokeCap::Butt),
+    );
+    let publication = publication(vec![transformed, stroke]);
+
+    let first = renderer.render_offscreen_publication(&publication, &provider)?;
+    assert_eq!(
+        pixel(first.readback(), 12, 36),
+        [0, 0, 0, 0],
+        "the independent owner-local clip excludes transformed primitive coverage"
+    );
+    assert_pixel_near(
+        pixel(first.readback(), 20, 36),
+        color_bytes(fill_gradient.sample_at(point(12.5, 4.5))),
+        1,
+    );
+    assert_pixel_near(
+        pixel(first.readback(), 48, 40),
+        color_bytes(stroke_gradient.sample_at(point(48.5, 40.5))),
+        1,
+    );
+
+    let first_generation = first.target_generation();
+    let first_pixels = first.readback().rgba8_srgb().to_vec();
+    assert!(renderer.discard_offscreen_target());
+    let rebuilt = renderer.render_offscreen_publication(&publication, &provider)?;
+    assert_eq!(
+        rebuilt.update_plan().mode(),
+        PublicationUpdateMode::FullResync
+    );
+    assert_ne!(rebuilt.target_generation(), first_generation);
+    assert_eq!(rebuilt.readback().rgba8_srgb(), first_pixels);
+    Ok(())
+}
+
+fn color_bytes(color: Color) -> [u8; 4] {
+    [color.red(), color.green(), color.blue(), color.alpha()]
+}
+
+fn assert_pixel_near(actual: [u8; 4], expected: [u8; 4], tolerance: u8) {
+    for channel in 0..4 {
+        assert!(
+            actual[channel].abs_diff(expected[channel]) <= tolerance,
+            "channel {channel} differs: actual={actual:?}, expected={expected:?}, tolerance={tolerance}"
+        );
+    }
 }
 
 fn pixel(readback: &runenui_render_wgpu::OffscreenReadback, x: u32, y: u32) -> [u8; 4] {
