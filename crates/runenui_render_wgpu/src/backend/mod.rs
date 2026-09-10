@@ -658,13 +658,14 @@ impl Renderer {
             memory_hints: wgpu::MemoryHints::Performance,
             trace: wgpu::Trace::Off,
         };
-        let (device, queue) = adapter
-            .request_device(&device_descriptor)
-            .await
-            .map_err(|error| RendererInitError::DeviceUnavailable {
-                adapter_name: adapter_info.name.clone().into(),
-                detail: error.to_string().into(),
-            })?;
+        let (device, queue) =
+            adapter
+                .request_device(&device_descriptor)
+                .await
+                .map_err(|error| RendererInitError::DeviceUnavailable {
+                    adapter_name: adapter_info.name.clone().into(),
+                    detail: error.to_string().into(),
+                })?;
         let diagnostics = RendererDiagnostics {
             options,
             compiled_backends,
@@ -842,11 +843,12 @@ impl Renderer {
             .map_err(|error| OffscreenRenderError::BufferMap {
                 detail: error.to_string().into(),
             })?;
-        let mapped = slice
-            .get_mapped_range()
-            .map_err(|error| OffscreenRenderError::MappedRange {
-                detail: error.to_string().into(),
-            })?;
+        let mapped =
+            slice
+                .get_mapped_range()
+                .map_err(|error| OffscreenRenderError::MappedRange {
+                    detail: error.to_string().into(),
+                })?;
         let mut rgba8_srgb = Vec::with_capacity(layout.tight_buffer_size);
         for row in mapped.chunks_exact(layout.padded_bytes_per_row as usize) {
             rgba8_srgb.extend_from_slice(&row[..layout.tight_bytes_per_row]);
