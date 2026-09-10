@@ -383,9 +383,9 @@ fn checked_f32_up(value: f64) -> Option<f32> {
 mod tests {
     use runenui_core::{
         Brush, Color, ImageIntrinsicSize, ImagePrimitive, LogicalLength, LogicalPoint, LogicalRect,
-        LogicalTransform, PaintPrimitive, PathFillRule, PathVerb, Radius, ResourceKind, ResourceRef,
-        SceneLayer, SceneOpacity, ScenePath, SceneShape, ShapedTextRunPrimitive, StrokeCap,
-        StrokeJoin, StrokeStyle,
+        LogicalTransform, PaintPrimitive, PathFillRule, PathVerb, Radius, ResourceKind,
+        ResourceRef, SceneLayer, SceneOpacity, ScenePath, SceneShape, ShapedTextRunPrimitive,
+        StrokeCap, StrokeJoin, StrokeStyle,
     };
 
     use crate::scene::{PaintSceneComposition, PaintSceneItem, SceneClip};

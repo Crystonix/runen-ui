@@ -719,12 +719,7 @@ mod tests {
             Some(([10.0, 0.0], [10.0, 0.0]))
         );
         assert_eq!(
-            cubic_endpoint_tangents(
-                origin,
-                origin,
-                point(0.0, 10.0),
-                point(10.0, 10.0),
-            ),
+            cubic_endpoint_tangents(origin, origin, point(0.0, 10.0), point(10.0, 10.0),),
             Some(([0.0, 10.0], [10.0, 0.0]))
         );
         assert_eq!(
@@ -762,8 +757,14 @@ mod tests {
             .iter()
             .map(|position| position[0])
             .fold(f32::NEG_INFINITY, f32::max);
-        assert!(min_y <= -0.9, "start cap must extend against vertical limiting tangent");
-        assert!(max_x >= 10.9, "end cap must extend along horizontal limiting tangent");
+        assert!(
+            min_y <= -0.9,
+            "start cap must extend against vertical limiting tangent"
+        );
+        assert!(
+            max_x >= 10.9,
+            "end cap must extend along horizontal limiting tangent"
+        );
     }
 
     #[test]
