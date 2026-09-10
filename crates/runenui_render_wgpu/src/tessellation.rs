@@ -344,7 +344,7 @@ fn begin_geometric_contour(
     from: LogicalPoint,
 ) -> Result<(), TessellationError> {
     if !*active {
-        builder.begin(finite_point_from_logical(from)?);
+        builder.begin(finite_point_from_logical(from)?, NO_ATTRIBUTES);
         *active = true;
     }
     Ok(())
