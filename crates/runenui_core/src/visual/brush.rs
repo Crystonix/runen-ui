@@ -223,9 +223,9 @@ impl LinearGradient {
         let direction_y = f64::from(self.end.y()) - start_y;
         let point_x = f64::from(point.x()) - start_x;
         let point_y = f64::from(point.y()) - start_y;
-        let denominator = direction_x * direction_x + direction_y * direction_y;
-        let coordinate =
-            ((point_x * direction_x + point_y * direction_y) / denominator).clamp(0.0, 1.0);
+        let denominator = direction_y.mul_add(direction_y, direction_x * direction_x);
+        let numerator = point_y.mul_add(direction_y, point_x * direction_x);
+        let coordinate = (numerator / denominator).clamp(0.0, 1.0);
         sample_gradient_stops(self.stops.as_slice(), coordinate)
     }
 }
@@ -322,6 +322,10 @@ impl From<Color> for Brush {
     }
 }
 
+#[allow(
+    clippy::float_cmp,
+    reason = "exact equality is the public hard-stop boundary rule for validated authored offsets"
+)]
 fn sample_gradient_stops(stops: &[GradientStop], coordinate: f64) -> Color {
     let first = stops[0];
     let first_offset = f64::from(first.offset().get());
@@ -395,11 +399,16 @@ fn linear_to_srgb8(linear: f64) -> u8 {
     let srgb = if linear <= 0.003_130_8 {
         linear * 12.92
     } else {
-        1.055 * linear.powf(1.0 / 2.4) - 0.055
+        1.055_f64.mul_add(linear.powf(1.0 / 2.4), -0.055)
     };
     unit_to_u8(srgb)
 }
 
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the value is clamped to [0,1], scaled to the exact u8 range, and rounded before conversion"
+)]
 fn unit_to_u8(value: f64) -> u8 {
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
