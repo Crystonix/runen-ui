@@ -851,7 +851,8 @@ impl ResourceRenderer {
         scene: &[ResourceSceneItem],
     ) -> Result<(), PublicationRenderError> {
         let limits = self.literal.diagnostics().device_limits();
-        let max_bytes = u64::from(limits.max_storage_buffer_binding_size).min(limits.max_buffer_size);
+        let max_bytes =
+            u64::from(limits.max_storage_buffer_binding_size).min(limits.max_buffer_size);
         for (item_index, item) in scene.iter().enumerate() {
             let ResourceSceneItem::Solid(item) = item else {
                 continue;
@@ -860,11 +861,13 @@ impl ResourceRenderer {
                 continue;
             };
             if required_bytes > max_bytes {
-                return Err(PublicationRenderError::GradientStopBufferExceedsDeviceLimit {
-                    item_index,
-                    required_bytes,
-                    max_bytes,
-                });
+                return Err(
+                    PublicationRenderError::GradientStopBufferExceedsDeviceLimit {
+                        item_index,
+                        required_bytes,
+                        max_bytes,
+                    },
+                );
             }
         }
         Ok(())
@@ -1364,7 +1367,8 @@ fn encode_resource_scene_to_target(
                 clip_pipelines,
                 encoder,
                 color_view,
-                stencil_view.unwrap_or_else(|| unreachable!("fill/stroke item requires stencil target")),
+                stencil_view
+                    .unwrap_or_else(|| unreachable!("fill/stroke item requires stencil target")),
                 target_format,
                 extent,
                 canvas_extent,
