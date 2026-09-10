@@ -8,7 +8,7 @@ use std::{
 
 const RENDERER_MANIFEST: &str = "crates/runenui_render_wgpu/Cargo.toml";
 const RENDERER_SOURCE: &str = "crates/runenui_render_wgpu/src";
-const RENDERER_BACKEND_SOURCE: &str = "crates/runenui_render_wgpu/src/backend.rs";
+const RENDERER_BACKEND_SOURCE: &str = "crates/runenui_render_wgpu/src/backend/mod.rs";
 
 const ALLOWED_CORE_IDENTIFIERS: &[&str] = &[
     "Brush",
@@ -120,7 +120,7 @@ fn native_surface_construction_separates_display_and_window_ownership() -> Resul
     let contents = fs::read_to_string(root.join(RENDERER_BACKEND_SOURCE))
         .map_err(|error| format!("failed to read {RENDERER_BACKEND_SOURCE}: {error}"))?;
     let method_start = contents
-        .find("pub async fn request_with_surface_target")
+        .find("async fn request_with_surface_target")
         .ok_or_else(|| "renderer surface constructor is missing".to_owned())?;
     let method_end = contents[method_start..]
         .find("\n    fn create_instance")
