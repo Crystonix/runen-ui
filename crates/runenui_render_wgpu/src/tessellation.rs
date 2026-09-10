@@ -769,11 +769,15 @@ mod tests {
 
     #[test]
     fn miter_limit_falls_back_to_bevel_for_over_limit_join() {
+        // At the join, the incoming ray points left and the outgoing segment is
+        // (-2, 1). The enclosed angle is about 26.565 degrees, so the accepted
+        // miter-length / full-stroke-width ratio is about 2.176: limit 1 must
+        // bevel while limit 4 must retain the finite miter.
         let shape = path(
             vec![
                 PathVerb::MoveTo(point(0.0, 0.0)),
                 PathVerb::LineTo(point(10.0, 0.0)),
-                PathVerb::LineTo(point(10.0, 10.0)),
+                PathVerb::LineTo(point(8.0, 1.0)),
             ],
             PathFillRule::NonZero,
         );
@@ -785,6 +789,11 @@ mod tests {
                 .unwrap_or_else(|_| unreachable!("miter limit is valid")),
         )
         .unwrap_or_else(|_| unreachable!("limited miter tessellates"));
+        let bevel = tessellate_stroke(
+            &shape,
+            StrokeStyle::new(length(2.0)).with_join(StrokeJoin::Bevel),
+        )
+        .unwrap_or_else(|_| unreachable!("bevel tessellates"));
         let generous = tessellate_stroke(
             &shape,
             StrokeStyle::new(length(2.0))
@@ -793,18 +802,24 @@ mod tests {
                 .unwrap_or_else(|_| unreachable!("miter limit is valid")),
         )
         .unwrap_or_else(|_| unreachable!("generous miter tessellates"));
-        let limited_extent = limited
-            .positions
-            .iter()
-            .map(|position| position[0] - position[1])
-            .fold(f32::NEG_INFINITY, f32::max);
-        let generous_extent = generous
-            .positions
-            .iter()
-            .map(|position| position[0] - position[1])
-            .fold(f32::NEG_INFINITY, f32::max);
-        assert!(limited_extent <= 11.1);
-        assert!(generous_extent >= 11.9);
+        for geometry in [&limited, &bevel, &generous] {
+            assert_valid_geometry(geometry);
+        }
+
+        let max_x = |geometry: &TessellatedGeometry| {
+            geometry
+                .positions
+                .iter()
+                .map(|position| position[0])
+                .fold(f32::NEG_INFINITY, f32::max)
+        };
+        let limited_extent = max_x(&limited);
+        let bevel_extent = max_x(&bevel);
+        let generous_extent = max_x(&generous);
+
+        assert_eq!(limited_extent.to_bits(), bevel_extent.to_bits());
+        assert!(limited_extent < 10.5);
+        assert!(generous_extent > 14.0);
     }
 
     #[test]
