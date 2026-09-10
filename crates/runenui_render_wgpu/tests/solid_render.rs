@@ -255,7 +255,12 @@ fn real_gpu_gradients_match_core_sampling_and_hard_stop_semantics() -> Result<()
     let red = Color::rgb(255, 0, 0);
     let blue = Color::rgb(0, 0, 255);
 
-    let hard_stops = gradient_stops(&[(0.0, Color::BLACK), (0.5, red), (0.5, blue), (1.0, Color::WHITE)]);
+    let hard_stops = gradient_stops(&[
+        (0.25, red),
+        (0.5, red),
+        (0.5, blue),
+        (0.75, Color::WHITE),
+    ]);
     let hard_gradient = LinearGradient::new(point(0.5, 0.5), point(64.5, 0.5), hard_stops)
         .unwrap_or_else(|_| unreachable!("fixture hard-stop gradient is valid"));
     let hard_item = PaintContributionItem::fill(
@@ -292,6 +297,11 @@ fn real_gpu_gradients_match_core_sampling_and_hard_stop_semantics() -> Result<()
     let output = renderer.render_offscreen_publication(&publication, &provider)?;
     let readback = output.readback();
 
+    assert_eq!(
+        pixel(readback, 0, 4),
+        color_bytes(red),
+        "the first authored stop extends toward decreasing coordinates"
+    );
     assert_pixel_near(
         pixel(readback, 8, 4),
         color_bytes(hard_gradient.sample_at(point(8.5, 4.5))),
@@ -306,6 +316,11 @@ fn real_gpu_gradients_match_core_sampling_and_hard_stop_semantics() -> Result<()
         pixel(readback, 33, 4),
         color_bytes(hard_gradient.sample_at(point(33.5, 4.5))),
         1,
+    );
+    assert_eq!(
+        pixel(readback, 63, 4),
+        color_bytes(Color::WHITE),
+        "the last authored stop extends toward increasing coordinates"
     );
 
     assert_eq!(pixel(readback, 48, 28), color_bytes(Color::BLACK));
