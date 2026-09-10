@@ -32,8 +32,10 @@ remaining defects at that ownership boundary:
    coverage for that case and its private Lyon adapter can hand the degenerate
    rectangle to dependency tessellation; and
 2. ADR 0010 says degenerate caps and joins follow neutral geometry rather than backend
-   defaults, but it does not yet freeze how point-degenerate path segments or
-   zero-derivative Bézier endpoints participate in stroke topology.
+   defaults, while ADR 0011 defines structural segment-bearing contours without yet
+   freezing how geometrically point-degenerate segments affect fill boundary/winding
+   or stroke cap/join topology and how zero-derivative Bézier endpoints choose the
+   limiting tangent required by stroke realization.
 
 The same renderer audit also confirmed that dependency tessellation is a decomposition
 of one paint item, not additional scene content. A tessellator may emit overlapping
@@ -46,19 +48,20 @@ amend the accepted M6 rule or delegate the missing M9 behavior to Lyon.
 
 ## Relationship to accepted authority
 
-This ADR narrowly amends ADR 0010 only for:
+This ADR narrowly amends ADR 0010 and ADR 0011 only for:
 
 1. zero-extent `Rect` / `RoundedRect` stroke coverage;
-2. point-degenerate path segments and limiting endpoint tangents used by stroke caps
-   and joins; and
+2. the geometric contribution of point-degenerate path segments plus limiting endpoint
+   tangents used by stroke caps and joins; and
 3. the relationship between one logical paint item's coverage and disposable renderer
    tessellation overlap.
 
-ADR 0011 continues to control path fill-only synthetic closure, authored stroke
-closure, malformed contour ordering, path/ellipse boundary behavior, and ellipse
-zero-extent semantics. ADR 0012 continues to control composition-group ordering and
-scope. ADR 0013 continues to control common node decoration geometry/publication.
-Inherited M6 source-over/item-order/color/opacity semantics remain authoritative.
+ADR 0011 continues to control every other path fill-only synthetic-closure, authored
+stroke-closure, malformed-contour-ordering, path-boundary, and ellipse-degenerate rule;
+this amendment only fills its missing point-degenerate-segment geometry case. ADR 0012
+continues to control composition-group ordering and scope. ADR 0013 continues to
+control common node decoration geometry/publication. Inherited M6
+source-over/item-order/color/opacity semantics remain authoritative.
 
 ## Decision
 
@@ -106,7 +109,8 @@ A point-degenerate segment:
 A contour containing authored segments but no non-point-degenerate segment therefore
 has empty geometric fill and stroke coverage. This does not turn it back into a
 move-only structural contour: an authored `close` remains valid under ADR 0011 because
-validation is structural.
+validation is structural. An open such contour's synthetic final-to-first fill edge is
+also point-degenerate and contributes no fill boundary or winding.
 
 ### Stroke topology skips point-degenerate segments without changing contour closure
 
@@ -202,8 +206,13 @@ the already-composed group result.
 
 ## Conformance impact
 
-This amendment adds no M9 row and changes no row status. It sharpens existing
-`M9VIS-03` to prove:
+This amendment adds no M9 row and changes no row status.
+
+It sharpens `M9VIS-02` to prove that point-degenerate authored segments remain
+structural/validation facts but create no fill boundary, winding change, or geometric
+coverage by themselves.
+
+It sharpens `M9VIS-03` to prove:
 
 - inherited zero-extent rectangle stroke emptiness;
 - zero-extent rounded-rectangle stroke emptiness;
@@ -214,7 +223,7 @@ This amendment adds no M9 row and changes no row status. It sharpens existing
   renderer tessellation overlaps itself.
 
 `M9VIS-10` continues to own the dependency boundary and must negatively prove that
-Lyon's tessellation/default/recovery behavior does not become stroke geometry or
+Lyon's tessellation/default/recovery behavior does not become fill/stroke geometry or
 composition authority.
 
 The matrix remains exactly 25 rows, all blocked until normal M9 implementation,
@@ -225,7 +234,8 @@ proof, owner acceptance, merge, and accepted-main validation occur.
 - The in-flight M9 item-bound regression for zero-extent `Rect` stroke must be repaired
   before the current M9A renderer work can converge.
 - The private Lyon adapter must reject empty rectangle-family strokes and must not let
-  point-degenerate path segments manufacture dependency-specific caps/joins.
+  point-degenerate path segments manufacture dependency-specific fill edges,
+  caps, joins, or tangents.
 - Production generic stroke realization must treat tessellation as one primitive's
   coverage decomposition. Naive alpha blending of every overlapping Lyon triangle is
   insufficient proof for translucent/self-overlapping strokes.
@@ -241,8 +251,9 @@ never amended.
 
 ### Let Lyon decide zero-length segments, endpoint tangents, or cusp recovery
 
-Rejected because ADR 0010 already makes degenerate cap/join geometry RunenUI-owned.
-Changing Lyon version or tessellation strategy cannot change public stroke coverage.
+Rejected because ADR 0010 already makes degenerate cap/join geometry RunenUI-owned and
+ADR 0011 makes path fill boundary topology RunenUI-owned. Changing Lyon version or
+tessellation strategy cannot change public fill/stroke coverage.
 
 ### Treat every authored zero-length segment as an endpoint-cap primitive
 
