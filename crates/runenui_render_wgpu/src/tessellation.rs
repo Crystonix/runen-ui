@@ -690,7 +690,7 @@ mod tests {
                 PathVerb::MoveTo(point(0.0, 0.0)),
                 PathVerb::LineTo(point(0.0, 0.0)),
                 PathVerb::LineTo(point(10.0, 0.0)),
-                PathVerb::LineTo(point(10.0, 10.0)),
+                PathVerb::LineTo(point(0.0, 0.0)),
                 PathVerb::Close,
             ],
             PathFillRule::NonZero,
@@ -719,8 +719,30 @@ mod tests {
             Some(([10.0, 0.0], [10.0, 0.0]))
         );
         assert_eq!(
+            quadratic_endpoint_tangents(origin, point(10.0, 0.0), point(10.0, 0.0)),
+            Some(([10.0, 0.0], [10.0, 0.0]))
+        );
+        assert_eq!(
             cubic_endpoint_tangents(origin, origin, point(0.0, 10.0), point(10.0, 10.0),),
             Some(([0.0, 10.0], [10.0, 0.0]))
+        );
+        assert_eq!(
+            cubic_endpoint_tangents(
+                origin,
+                point(0.0, 10.0),
+                point(10.0, 10.0),
+                point(10.0, 10.0),
+            ),
+            Some(([0.0, 10.0], [10.0, 0.0]))
+        );
+        assert_eq!(
+            cubic_endpoint_tangents(
+                origin,
+                point(10.0, 0.0),
+                point(10.0, 0.0),
+                point(10.0, 0.0),
+            ),
+            Some(([10.0, 0.0], [10.0, 0.0]))
         );
         assert_eq!(
             cubic_endpoint_tangents(origin, origin, origin, origin),
@@ -729,8 +751,62 @@ mod tests {
     }
 
     #[test]
-    fn zero_derivative_cubic_endpoint_caps_follow_limiting_tangents() {
-        let shape = path(
+    fn zero_derivative_bezier_endpoint_caps_follow_limiting_tangents() {
+        let horizontal_cases = [
+            path(
+                vec![
+                    PathVerb::MoveTo(point(0.0, 0.0)),
+                    PathVerb::QuadraticTo {
+                        control: point(0.0, 0.0),
+                        to: point(10.0, 0.0),
+                    },
+                ],
+                PathFillRule::NonZero,
+            ),
+            path(
+                vec![
+                    PathVerb::MoveTo(point(0.0, 0.0)),
+                    PathVerb::QuadraticTo {
+                        control: point(10.0, 0.0),
+                        to: point(10.0, 0.0),
+                    },
+                ],
+                PathFillRule::NonZero,
+            ),
+            path(
+                vec![
+                    PathVerb::MoveTo(point(0.0, 0.0)),
+                    PathVerb::CubicTo {
+                        control1: point(0.0, 0.0),
+                        control2: point(10.0, 0.0),
+                        to: point(10.0, 0.0),
+                    },
+                ],
+                PathFillRule::NonZero,
+            ),
+        ];
+        for shape in horizontal_cases {
+            let geometry = tessellate_stroke(
+                &shape,
+                StrokeStyle::new(length(2.0)).with_cap(StrokeCap::Square),
+            )
+            .unwrap_or_else(|_| unreachable!("Bezier stroke tessellates"));
+            assert_valid_geometry(&geometry);
+            let min_x = geometry
+                .positions
+                .iter()
+                .map(|position| position[0])
+                .fold(f32::INFINITY, f32::min);
+            let max_x = geometry
+                .positions
+                .iter()
+                .map(|position| position[0])
+                .fold(f32::NEG_INFINITY, f32::max);
+            assert!(min_x <= -0.9, "start cap must follow limiting tangent");
+            assert!(max_x >= 10.9, "end cap must follow limiting tangent");
+        }
+
+        let curved_cubic = path(
             vec![
                 PathVerb::MoveTo(point(0.0, 0.0)),
                 PathVerb::CubicTo {
@@ -742,7 +818,7 @@ mod tests {
             PathFillRule::NonZero,
         );
         let geometry = tessellate_stroke(
-            &shape,
+            &curved_cubic,
             StrokeStyle::new(length(2.0)).with_cap(StrokeCap::Square),
         )
         .unwrap_or_else(|_| unreachable!("curve stroke tessellates"));
