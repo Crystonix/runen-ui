@@ -2,9 +2,7 @@ mod solid;
 
 use std::collections::HashSet;
 
-use runenui_core::{
-    Brush, Color, LogicalSize, PaintPrimitive, ResourceKind, ResourceRef, SceneShape,
-};
+use runenui_core::{Color, LogicalSize, PaintPrimitive, ResourceKind, ResourceRef, SceneShape};
 use runenui_runtime::{PaintPublication, RasterScale, SceneCapabilities, SceneClip};
 use wgpu::util::DeviceExt;
 
@@ -42,8 +40,14 @@ pub enum UnsupportedShapedGlyphKind {
 pub enum PublicationRenderError {
     /// Existing renderer/device/target/readback failure.
     Backend(OffscreenRenderError),
-    /// Private solid geometry realization failed before target mutation.
+    /// Private fill/stroke geometry realization failed before target mutation.
     SolidGeometry { item_index: usize, detail: String },
+    /// An accepted gradient stop list exceeds this renderer device's buffer limits.
+    GradientStopBufferExceedsDeviceLimit {
+        item_index: usize,
+        required_bytes: u64,
+        max_bytes: u64,
+    },
     /// Caller-owned logical resource resolution failed before target mutation.
     Resource {
         item_index: usize,
@@ -103,7 +107,15 @@ impl core::fmt::Display for PublicationRenderError {
             Self::Backend(error) => error.fmt(formatter),
             Self::SolidGeometry { item_index, detail } => write!(
                 formatter,
-                "renderer failed to realize solid geometry for scene item {item_index}: {detail}"
+                "renderer failed to realize paint geometry for scene item {item_index}: {detail}"
+            ),
+            Self::GradientStopBufferExceedsDeviceLimit {
+                item_index,
+                required_bytes,
+                max_bytes,
+            } => write!(
+                formatter,
+                "renderer gradient stops for scene item {item_index} require {required_bytes} bytes, exceeding device storage-buffer limit {max_bytes}"
             ),
             Self::Resource { item_index, error } => write!(
                 formatter,
@@ -187,6 +199,7 @@ impl core::error::Error for PublicationRenderError {
             Self::Backend(error) => Some(error),
             Self::Resource { error, .. } => Some(error),
             Self::SolidGeometry { .. }
+            | Self::GradientStopBufferExceedsDeviceLimit { .. }
             | Self::ImageExtentExceedsDeviceLimit { .. }
             | Self::ImageRowBytesOverflow { .. }
             | Self::ShapedGlyphExtentExceedsDeviceLimit { .. }
@@ -217,6 +230,7 @@ impl PublicationRenderError {
     const fn item_index(&self) -> Option<usize> {
         match self {
             Self::SolidGeometry { item_index, .. }
+            | Self::GradientStopBufferExceedsDeviceLimit { item_index, .. }
             | Self::Resource { item_index, .. }
             | Self::ImageExtentExceedsDeviceLimit { item_index, .. }
             | Self::ImageRowBytesOverflow { item_index, .. }
@@ -242,7 +256,7 @@ impl PublicationRenderError {
 /// Canonical provider-aware renderer facade.
 ///
 /// The wrapped renderer remains the single owner of instance/device/queue/targets
-/// and publication lineage. Solid tessellation/coverage, external images, and shaped
+/// and publication lineage. Fill/stroke tessellation/coverage, external images, and shaped
 /// text are disposable realization details under this one mixed-scene transaction.
 #[derive(Debug)]
 pub struct ResourceRenderer {
@@ -382,9 +396,9 @@ impl ResourceRenderer {
 
     /// Renders one complete publication and reads actual GPU bytes.
     ///
-    /// Solid fill/stroke geometry, images, and shaped text share one ordered target
-    /// transaction. All scene validation, solid tessellation, and resource preflight
-    /// complete before retained-target mutation.
+    /// Fill/stroke geometry, images, and shaped text share one ordered target
+    /// transaction. Scene validation, geometry realization, device-limit checks, and
+    /// resource preflight complete before retained-target mutation.
     #[allow(
         clippy::too_many_lines,
         reason = "the mixed render transaction intentionally keeps preflight, target mutation, ordered realization, readback, and lineage commit in one auditable sequence"
@@ -395,6 +409,7 @@ impl ResourceRenderer {
         provider: &P,
     ) -> Result<OffscreenPublicationReadback, PublicationRenderError> {
         let scene = prepare_resource_scene(publication)?;
+        self.preflight_gradient_stop_buffers(&scene)?;
         let (canvas_extent, extent) = publication_extents(publication)?;
         self.literal.base.validate_extent(extent)?;
         let layout = ReadbackLayout::new(extent)?;
@@ -637,6 +652,7 @@ impl ResourceRenderer {
         before_present: impl FnOnce(),
     ) -> Result<crate::PublicationObservation, PublicationRenderError> {
         let scene = prepare_resource_scene(publication)?;
+        self.preflight_gradient_stop_buffers(&scene)?;
         let extent = self
             .surface_extent
             .ok_or(PublicationRenderError::SurfaceNotConfigured)?;
@@ -828,6 +844,30 @@ impl ResourceRenderer {
             .last_observation
             .clone()
             .unwrap_or_else(|| unreachable!("surface publication observation was recorded")))
+    }
+
+    fn preflight_gradient_stop_buffers(
+        &self,
+        scene: &[ResourceSceneItem],
+    ) -> Result<(), PublicationRenderError> {
+        let limits = self.literal.diagnostics().device_limits();
+        let max_bytes = u64::from(limits.max_storage_buffer_binding_size).min(limits.max_buffer_size);
+        for (item_index, item) in scene.iter().enumerate() {
+            let ResourceSceneItem::Solid(item) = item else {
+                continue;
+            };
+            let Some(required_bytes) = item.gradient_stop_buffer_size() else {
+                continue;
+            };
+            if required_bytes > max_bytes {
+                return Err(PublicationRenderError::GradientStopBufferExceedsDeviceLimit {
+                    item_index,
+                    required_bytes,
+                    max_bytes,
+                });
+            }
+        }
+        Ok(())
     }
 
     fn preflight_resources<P: ResourceProvider + ?Sized>(
@@ -1087,15 +1127,9 @@ fn prepare_resource_scene(
 
         match item.primitive() {
             PaintPrimitive::Fill { shape, brush } => {
-                let Brush::Solid(color) = brush else {
-                    return Err(scene_failure(SceneValidationError::UnsupportedItem {
-                        item_index,
-                        semantic: UnsupportedSceneSemantic::NonSolidBrush,
-                    }));
-                };
                 let solid = solid::SupportedSolid::fill(
                     shape,
-                    *color,
+                    brush.clone(),
                     item.opacity(),
                     item.local_to_surface(),
                     item.clips().to_vec(),
@@ -1111,16 +1145,10 @@ fn prepare_resource_scene(
                 brush,
                 style,
             } => {
-                let Brush::Solid(color) = brush else {
-                    return Err(scene_failure(SceneValidationError::UnsupportedItem {
-                        item_index,
-                        semantic: UnsupportedSceneSemantic::NonSolidBrush,
-                    }));
-                };
                 let solid = solid::SupportedSolid::stroke(
                     shape,
                     *style,
-                    *color,
+                    brush.clone(),
                     item.opacity(),
                     item.local_to_surface(),
                     item.clips().to_vec(),
@@ -1310,7 +1338,7 @@ fn resource_observations_for_scene(
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "the ordered mixed-scene encoder keeps the single device, exact target/canvas/scale, disposable solid coverage, optional clip realization, and resource renderers explicit"
+    reason = "the ordered mixed-scene encoder keeps the single device, exact target/canvas/scale, disposable fill/stroke coverage, optional clip realization, and resource renderers explicit"
 )]
 fn encode_resource_scene_to_target(
     device: &wgpu::Device,
@@ -1336,7 +1364,7 @@ fn encode_resource_scene_to_target(
                 clip_pipelines,
                 encoder,
                 color_view,
-                stencil_view.unwrap_or_else(|| unreachable!("solid item requires stencil target")),
+                stencil_view.unwrap_or_else(|| unreachable!("fill/stroke item requires stencil target")),
                 target_format,
                 extent,
                 canvas_extent,
