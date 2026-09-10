@@ -11,7 +11,7 @@ use runenui_core::{
     Brush, Color, ContributionClip, Element, LogicalLength, LogicalPoint, LogicalRect, LogicalSize,
     LogicalTransform, NoHostProtocol, PaintContribution, PaintContributionContext,
     PaintContributionItem, PathFillRule, PathVerb, ResourceRef, ScenePath, SceneShape, StrokeCap,
-    StrokeJoin, StrokeStyle, StyleEnvironment, UiApp, Widget, WidgetMeasure, WidgetUpdateContext,
+    StrokeJoin, StrokeStyle, StyleEnvironment, UiApp, Widget, WidgetMeasure,
 };
 use runenui_render_wgpu::{
     BackendSelection, PublicationUpdateMode, Renderer, RendererInitError, RendererOptions,
@@ -35,14 +35,6 @@ impl Widget<Vec<PaintContributionItem>> for SceneFixture {
 
     fn create_state(&self) -> Self::State {
         self.items.clone()
-    }
-
-    fn update(
-        &self,
-        state: &mut Self::State,
-        _: &mut WidgetUpdateContext<Vec<PaintContributionItem>>,
-    ) {
-        state.clone_from(&self.items);
     }
 
     fn measure(&self, _: &Self::State, _: runenui_core::WidgetMeasureInput) -> WidgetMeasure {
@@ -113,8 +105,7 @@ fn publication(items: Vec<PaintContributionItem>) -> PaintPublication {
         .unwrap_or_else(|_| unreachable!("fixture surface extent is valid"));
     let context = SurfaceBuildContext::new(&environment, LayoutConstraints::tight(logical_size))
         .with_raster_scale(
-            RasterScale::new(1.0)
-                .unwrap_or_else(|_| unreachable!("fixture raster scale is valid")),
+            RasterScale::new(1.0).unwrap_or_else(|_| unreachable!("fixture raster scale is valid")),
         );
     runtime
         .publish_surface(&context)
@@ -124,8 +115,8 @@ fn publication(items: Vec<PaintContributionItem>) -> PaintPublication {
 }
 
 #[test]
-fn real_gpu_generic_solids_preserve_shape_transform_clip_and_degenerate_semantics(
-) -> Result<(), Box<dyn Error>> {
+fn real_gpu_generic_solids_preserve_shape_transform_clip_and_degenerate_semantics()
+-> Result<(), Box<dyn Error>> {
     let Some(mut renderer) = renderer_or_adapterless()? else {
         return Ok(());
     };
@@ -187,8 +178,8 @@ fn real_gpu_generic_solids_preserve_shape_transform_clip_and_degenerate_semantic
 }
 
 #[test]
-fn real_gpu_self_overlap_is_one_source_and_rebuilds_after_target_loss(
-) -> Result<(), Box<dyn Error>> {
+fn real_gpu_self_overlap_is_one_source_and_rebuilds_after_target_loss() -> Result<(), Box<dyn Error>>
+{
     let Some(mut renderer) = renderer_or_adapterless()? else {
         return Ok(());
     };
@@ -229,7 +220,10 @@ fn real_gpu_self_overlap_is_one_source_and_rebuilds_after_target_loss(
     let first_pixels = first.readback().rgba8_srgb().to_vec();
     assert!(renderer.discard_offscreen_target());
     let rebuilt = renderer.render_offscreen_publication(&publication, &provider)?;
-    assert_eq!(rebuilt.update_plan().mode(), PublicationUpdateMode::FullResync);
+    assert_eq!(
+        rebuilt.update_plan().mode(),
+        PublicationUpdateMode::FullResync
+    );
     assert_ne!(rebuilt.target_generation(), first_generation);
     assert_eq!(rebuilt.readback().rgba8_srgb(), first_pixels);
     Ok(())
