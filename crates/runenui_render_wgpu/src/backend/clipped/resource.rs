@@ -2,8 +2,8 @@ mod solid;
 
 use std::collections::HashSet;
 
-use runenui_core::{Color, LogicalSize, PaintPrimitive, ResourceKind, ResourceRef, SceneShape};
-use runenui_runtime::{PaintPublication, RasterScale, SceneCapabilities, SceneClip};
+use runenui_core::{Color, LogicalSize, PaintPrimitive, ResourceKind, ResourceRef};
+use runenui_runtime::{PaintPublication, RasterScale, SceneCapabilities};
 use wgpu::util::DeviceExt;
 
 use crate::{
@@ -21,8 +21,9 @@ use super::super::{
     scene_validation_error,
 };
 use super::{
-    ClipTargetPipelines, Renderer, apply_clip_mask, clear_color_target, clear_stencil_mask,
-    create_stencil_target, image, prepare_clip_uniforms, shaped,
+    Renderer, clear_color_target, clear_stencil_mask,
+    clip::{self, ClipRenderer, PreparedClip},
+    create_stencil_target, image, shaped,
 };
 
 /// Explicitly unsupported glyph source encountered during renderer-owned outline realization.
@@ -42,6 +43,12 @@ pub enum PublicationRenderError {
     Backend(OffscreenRenderError),
     /// Private fill/stroke geometry realization failed before target mutation.
     SolidGeometry { item_index: usize, detail: String },
+    /// Private clip geometry realization failed before target mutation.
+    ClipGeometry {
+        item_index: usize,
+        clip_index: usize,
+        detail: String,
+    },
     /// An accepted gradient stop list exceeds this renderer device's buffer limits.
     GradientStopBufferExceedsDeviceLimit {
         item_index: usize,
@@ -108,6 +115,14 @@ impl core::fmt::Display for PublicationRenderError {
             Self::SolidGeometry { item_index, detail } => write!(
                 formatter,
                 "renderer failed to realize paint geometry for scene item {item_index}: {detail}"
+            ),
+            Self::ClipGeometry {
+                item_index,
+                clip_index,
+                detail,
+            } => write!(
+                formatter,
+                "renderer failed to realize clip {clip_index} geometry for scene item {item_index}: {detail}"
             ),
             Self::GradientStopBufferExceedsDeviceLimit {
                 item_index,
@@ -199,6 +214,7 @@ impl core::error::Error for PublicationRenderError {
             Self::Backend(error) => Some(error),
             Self::Resource { error, .. } => Some(error),
             Self::SolidGeometry { .. }
+            | Self::ClipGeometry { .. }
             | Self::GradientStopBufferExceedsDeviceLimit { .. }
             | Self::ImageExtentExceedsDeviceLimit { .. }
             | Self::ImageRowBytesOverflow { .. }
@@ -230,6 +246,7 @@ impl PublicationRenderError {
     const fn item_index(&self) -> Option<usize> {
         match self {
             Self::SolidGeometry { item_index, .. }
+            | Self::ClipGeometry { item_index, .. }
             | Self::GradientStopBufferExceedsDeviceLimit { item_index, .. }
             | Self::Resource { item_index, .. }
             | Self::ImageExtentExceedsDeviceLimit { item_index, .. }
@@ -261,6 +278,7 @@ impl PublicationRenderError {
 #[derive(Debug)]
 pub struct ResourceRenderer {
     literal: Renderer,
+    clips: ClipRenderer,
     solids: solid::SolidRenderer,
     images: image::ImageRenderer,
     shaped_runs: shaped::ShapedRunRenderer,
@@ -297,11 +315,13 @@ impl ResourceRenderer {
     }
 
     fn from_literal(literal: Renderer) -> Self {
+        let clips = ClipRenderer::new(&literal.base.device);
         let solids = solid::SolidRenderer::new();
         let images = image::ImageRenderer::new(&literal.base.device);
         let shaped_runs = shaped::ShapedRunRenderer::new(&literal.base.device);
         Self {
             literal,
+            clips,
             solids,
             images,
             shaped_runs,
@@ -456,7 +476,6 @@ impl ResourceRenderer {
             .iter()
             .any(|item| matches!(item, ResourceSceneItem::ShapedTextRun(_)));
         let needs_stencil = scene.iter().any(ResourceSceneItem::needs_stencil);
-        let needs_clip_pipelines = scene.iter().any(ResourceSceneItem::has_clips);
         let live_images = live_image_resources(&scene);
         let live_shaped_runs = live_shaped_run_resources(&scene, publication);
         let initial_resource_observations = resource_observations_for_scene(
@@ -511,9 +530,6 @@ impl ResourceRenderer {
                 self.solids
                     .ensure_pipelines(&self.literal.base.device, OFFSCREEN_FORMAT)?;
             }
-            if needs_clip_pipelines {
-                self.literal.ensure_clip_pipelines(OFFSCREEN_FORMAT)?;
-            }
             if has_images {
                 self.images
                     .ensure_pipelines(&self.literal.base.device, OFFSCREEN_FORMAT)?;
@@ -563,16 +579,10 @@ impl ResourceRenderer {
             && needs_stencil)
             .then(|| create_stencil_target(&self.literal.base.device, extent));
         if update_plan.mode() != PublicationUpdateMode::AlreadyCurrent {
-            let clip_pipelines = needs_clip_pipelines.then(|| {
-                self.literal
-                    .clip_pipelines
-                    .get(&target.format)
-                    .unwrap_or_else(|| unreachable!("clip pipelines are cached"))
-            });
             encode_resource_scene_to_target(
                 &self.literal.base.device,
                 &self.solids,
-                clip_pipelines,
+                &self.clips,
                 &self.images,
                 &mut encoder,
                 &target.view,
@@ -683,7 +693,6 @@ impl ResourceRenderer {
             .iter()
             .any(|item| matches!(item, ResourceSceneItem::ShapedTextRun(_)));
         let needs_stencil = scene.iter().any(ResourceSceneItem::needs_stencil);
-        let needs_clip_pipelines = scene.iter().any(ResourceSceneItem::has_clips);
         let live_images = live_image_resources(&scene);
         let live_shaped_runs = live_shaped_run_resources(&scene, publication);
         let initial_resource_observations = resource_observations_for_scene(
@@ -737,9 +746,6 @@ impl ResourceRenderer {
             if has_solids {
                 self.solids
                     .ensure_pipelines(&self.literal.base.device, target_format)?;
-            }
-            if needs_clip_pipelines {
-                self.literal.ensure_clip_pipelines(target_format)?;
             }
             if has_images {
                 self.images
@@ -797,12 +803,6 @@ impl ResourceRenderer {
             .create_view(&wgpu::TextureViewDescriptor::default());
         let stencil_target =
             needs_stencil.then(|| create_stencil_target(&self.literal.base.device, extent));
-        let clip_pipelines = needs_clip_pipelines.then(|| {
-            self.literal
-                .clip_pipelines
-                .get(&target_format)
-                .unwrap_or_else(|| unreachable!("native clip pipelines are cached"))
-        });
         let mut encoder =
             self.literal
                 .base
@@ -813,7 +813,7 @@ impl ResourceRenderer {
         encode_resource_scene_to_target(
             &self.literal.base.device,
             &self.solids,
-            clip_pipelines,
+            &self.clips,
             &self.images,
             &mut encoder,
             &color_view,
@@ -1078,26 +1078,18 @@ impl ResourceSceneItem {
             Self::ShapedTextRun(item) => !item.clips.is_empty(),
         }
     }
-
-    const fn has_clips(&self) -> bool {
-        match self {
-            Self::Solid(item) => item.has_clips(),
-            Self::Image(item) => !item.clips.is_empty(),
-            Self::ShapedTextRun(item) => !item.clips.is_empty(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 struct ImageSceneItem {
     image: image::SupportedImage,
-    clips: Vec<SceneClip>,
+    clips: Vec<PreparedClip>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 struct ShapedTextRunSceneItem {
     shaped_run: shaped::SupportedShapedRun,
-    clips: Vec<SceneClip>,
+    clips: Vec<PreparedClip>,
 }
 
 fn prepare_resource_scene(
@@ -1115,19 +1107,13 @@ fn prepare_resource_scene(
     let mut items = Vec::with_capacity(publication.scene().items().len());
     for (item_index, item) in publication.scene().items().iter().enumerate() {
         validate_item_composition(item_index, item).map_err(scene_failure)?;
-        for clip in item.clips() {
-            let semantic = match clip.shape() {
-                SceneShape::Rect(_) | SceneShape::RoundedRect { .. } => None,
-                SceneShape::Ellipse(_) => Some(UnsupportedSceneSemantic::EllipseClip),
-                SceneShape::Path(_) => Some(UnsupportedSceneSemantic::PathClip),
-            };
-            if let Some(semantic) = semantic {
-                return Err(scene_failure(SceneValidationError::UnsupportedItem {
-                    item_index,
-                    semantic,
-                }));
+        let prepared_clips = clip::prepare_clips(item.clips()).map_err(|failure| {
+            PublicationRenderError::ClipGeometry {
+                item_index,
+                clip_index: failure.clip_index(),
+                detail: failure.error().to_string(),
             }
-        }
+        })?;
 
         match item.primitive() {
             PaintPrimitive::Fill { shape, brush } => {
@@ -1136,7 +1122,7 @@ fn prepare_resource_scene(
                     brush.clone(),
                     item.opacity(),
                     item.local_to_surface(),
-                    item.clips().to_vec(),
+                    prepared_clips,
                 )
                 .map_err(|error| PublicationRenderError::SolidGeometry {
                     item_index,
@@ -1155,7 +1141,7 @@ fn prepare_resource_scene(
                     brush.clone(),
                     item.opacity(),
                     item.local_to_surface(),
-                    item.clips().to_vec(),
+                    prepared_clips,
                 )
                 .map_err(|error| PublicationRenderError::SolidGeometry {
                     item_index,
@@ -1193,7 +1179,7 @@ fn prepare_resource_scene(
                         opacity: item.opacity(),
                         local_to_surface: item.local_to_surface(),
                     },
-                    clips: item.clips().to_vec(),
+                    clips: prepared_clips,
                 }));
             }
             PaintPrimitive::ShapedTextRun(shaped_run) => {
@@ -1206,7 +1192,7 @@ fn prepare_resource_scene(
                         opacity: item.opacity(),
                         local_to_surface: item.local_to_surface(),
                     },
-                    clips: item.clips().to_vec(),
+                    clips: prepared_clips,
                 }));
             }
             _ => {
@@ -1342,12 +1328,12 @@ fn resource_observations_for_scene(
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "the ordered mixed-scene encoder keeps the single device, exact target/canvas/scale, disposable fill/stroke coverage, optional clip realization, and resource renderers explicit"
+    reason = "the ordered mixed-scene encoder keeps the single device, exact target/canvas/scale, disposable fill/stroke coverage, generic clip realization, and resource renderers explicit"
 )]
 fn encode_resource_scene_to_target(
     device: &wgpu::Device,
     solid_renderer: &solid::SolidRenderer,
-    clip_pipelines: Option<&ClipTargetPipelines>,
+    clip_renderer: &ClipRenderer,
     image_renderer: &image::ImageRenderer,
     encoder: &mut wgpu::CommandEncoder,
     color_view: &wgpu::TextureView,
@@ -1365,7 +1351,7 @@ fn encode_resource_scene_to_target(
         match item {
             ResourceSceneItem::Solid(item) => solid_renderer.encode_item(
                 device,
-                clip_pipelines,
+                clip_renderer,
                 encoder,
                 color_view,
                 stencil_view
@@ -1378,7 +1364,7 @@ fn encode_resource_scene_to_target(
             ),
             ResourceSceneItem::Image(item) => encode_resource_image_item(
                 device,
-                clip_pipelines,
+                clip_renderer,
                 image_renderer,
                 encoder,
                 color_view,
@@ -1391,7 +1377,7 @@ fn encode_resource_scene_to_target(
             ),
             ResourceSceneItem::ShapedTextRun(item) => encode_resource_shaped_run_item(
                 device,
-                clip_pipelines,
+                clip_renderer,
                 shaped_renderer,
                 encoder,
                 color_view,
@@ -1409,11 +1395,11 @@ fn encode_resource_scene_to_target(
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "mixed-scene image dispatch keeps exact geometry, target format, optional stencil realization, and cached resource identity explicit at the sampled-image draw boundary"
+    reason = "mixed-scene image dispatch keeps exact geometry, target format, generic clip realization, and cached resource identity explicit at the sampled-image draw boundary"
 )]
 fn encode_resource_image_item(
     device: &wgpu::Device,
-    clip_pipelines: Option<&ClipTargetPipelines>,
+    clip_renderer: &ClipRenderer,
     image_renderer: &image::ImageRenderer,
     encoder: &mut wgpu::CommandEncoder,
     color_view: &wgpu::TextureView,
@@ -1448,17 +1434,18 @@ fn encode_resource_image_item(
         return;
     }
 
-    let Some(clip_uniforms) = prepare_clip_uniforms(&item.clips, raster_scale) else {
-        return;
-    };
     let stencil_view =
         stencil_view.unwrap_or_else(|| unreachable!("clipped image requires stencil target"));
-    let clip_pipelines =
-        clip_pipelines.unwrap_or_else(|| unreachable!("clipped image requires mask pipelines"));
     clear_stencil_mask(encoder, stencil_view);
-    for uniform in &clip_uniforms {
-        apply_clip_mask(device, encoder, stencil_view, &clip_pipelines.mask, uniform);
-    }
+    clip_renderer.apply_clips(
+        device,
+        encoder,
+        stencil_view,
+        extent,
+        canvas_extent,
+        raster_scale,
+        &item.clips,
+    );
     image_renderer.draw(
         target_format,
         encoder,
@@ -1472,11 +1459,11 @@ fn encode_resource_image_item(
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "mixed-scene shaped-text dispatch keeps exact geometry, renderer quality realization, target format, optional stencil realization, and sampled MSDF atlas authority explicit"
+    reason = "mixed-scene shaped-text dispatch keeps exact geometry, renderer quality realization, target format, generic clip realization, and sampled MSDF atlas authority explicit"
 )]
 fn encode_resource_shaped_run_item(
     device: &wgpu::Device,
-    clip_pipelines: Option<&ClipTargetPipelines>,
+    clip_renderer: &ClipRenderer,
     shaped_renderer: &shaped::ShapedRunRenderer,
     encoder: &mut wgpu::CommandEncoder,
     color_view: &wgpu::TextureView,
@@ -1505,17 +1492,18 @@ fn encode_resource_shaped_run_item(
     let stencil_view = if item.clips.is_empty() {
         None
     } else {
-        let Some(clip_uniforms) = prepare_clip_uniforms(&item.clips, raster_scale) else {
-            return;
-        };
         let stencil_view = stencil_view
             .unwrap_or_else(|| unreachable!("clipped shaped-text requires stencil target"));
-        let clip_pipelines = clip_pipelines
-            .unwrap_or_else(|| unreachable!("clipped shaped-text requires mask pipelines"));
         clear_stencil_mask(encoder, stencil_view);
-        for uniform in &clip_uniforms {
-            apply_clip_mask(device, encoder, stencil_view, &clip_pipelines.mask, uniform);
-        }
+        clip_renderer.apply_clips(
+            device,
+            encoder,
+            stencil_view,
+            extent,
+            canvas_extent,
+            raster_scale,
+            &item.clips,
+        );
         Some(stencil_view)
     };
     let quality = shaped::ShapedRunRenderer::quality(
