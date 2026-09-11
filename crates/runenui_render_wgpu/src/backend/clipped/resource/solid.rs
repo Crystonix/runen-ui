@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use runenui_core::{Brush, Color, LogicalTransform, SceneOpacity, SceneShape, StrokeStyle};
-use runenui_runtime::{RasterScale, SceneClip};
+use runenui_runtime::RasterScale;
 use wgpu::util::DeviceExt;
 
 use crate::tessellation::{
@@ -19,7 +19,8 @@ use super::super::super::{
     physical_point_to_ndc, srgb8_to_linear_f32,
 };
 use super::super::{
-    ClipTargetPipelines, STENCIL_ALLOWED, STENCIL_FORMAT, apply_clip_mask, prepare_clip_uniforms,
+    STENCIL_ALLOWED, STENCIL_FORMAT,
+    clip::{ClipRenderer, PreparedClip},
 };
 
 const COVERAGE_VERTEX_SIZE: usize = 8;
@@ -178,7 +179,7 @@ pub(super) struct SupportedSolid {
     brush: Brush,
     opacity: SceneOpacity,
     local_to_surface: LogicalTransform,
-    clips: Vec<SceneClip>,
+    clips: Vec<PreparedClip>,
 }
 
 impl SupportedSolid {
@@ -187,7 +188,7 @@ impl SupportedSolid {
         brush: Brush,
         opacity: SceneOpacity,
         local_to_surface: LogicalTransform,
-        clips: Vec<SceneClip>,
+        clips: Vec<PreparedClip>,
     ) -> Result<Self, TessellationError> {
         tessellate_fill(shape).map(|geometry| Self {
             geometry,
@@ -204,7 +205,7 @@ impl SupportedSolid {
         brush: Brush,
         opacity: SceneOpacity,
         local_to_surface: LogicalTransform,
-        clips: Vec<SceneClip>,
+        clips: Vec<PreparedClip>,
     ) -> Result<Self, TessellationError> {
         tessellate_stroke(shape, style).map(|geometry| Self {
             geometry,
@@ -301,12 +302,12 @@ impl SolidRenderer {
 
     #[allow(
         clippy::too_many_arguments,
-        reason = "the paint realization boundary keeps the exact target/canvas/scale, optional accepted clip machinery, and logical item input explicit"
+        reason = "the paint realization boundary keeps the exact target/canvas/scale, generic clip realization, and logical item input explicit"
     )]
     pub(super) fn encode_item(
         &self,
         device: &wgpu::Device,
-        clip_pipelines: Option<&ClipTargetPipelines>,
+        clip_renderer: &ClipRenderer,
         encoder: &mut wgpu::CommandEncoder,
         color_view: &wgpu::TextureView,
         stencil_view: &wgpu::TextureView,
@@ -342,14 +343,15 @@ impl SolidRenderer {
         );
 
         if item.has_clips() {
-            let Some(clip_uniforms) = prepare_clip_uniforms(&item.clips, raster_scale) else {
-                return;
-            };
-            let clip_pipelines = clip_pipelines
-                .unwrap_or_else(|| unreachable!("paint item clips require clip pipelines"));
-            for uniform in &clip_uniforms {
-                apply_clip_mask(device, encoder, stencil_view, &clip_pipelines.mask, uniform);
-            }
+            clip_renderer.apply_clips(
+                device,
+                encoder,
+                stencil_view,
+                extent,
+                canvas_extent,
+                raster_scale,
+                &item.clips,
+            );
         }
 
         shade_once(
@@ -465,8 +467,8 @@ fn coverage_stencil_state() -> wgpu::DepthStencilState {
         wgpu::StencilState {
             front: coverage_stencil_face(),
             back: coverage_stencil_face(),
-            read_mask: 0xff,
-            write_mask: 0xff,
+            read_mask: STENCIL_ALLOWED,
+            write_mask: STENCIL_ALLOWED,
         },
     )
 }
@@ -486,7 +488,7 @@ fn shade_stencil_state() -> wgpu::DepthStencilState {
         wgpu::StencilState {
             front: shade_stencil_face(),
             back: shade_stencil_face(),
-            read_mask: 0xff,
+            read_mask: STENCIL_ALLOWED,
             write_mask: 0,
         },
     )
