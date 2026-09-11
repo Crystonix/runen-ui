@@ -99,6 +99,16 @@ fn path(verbs: Vec<PathVerb>) -> SceneShape {
     )
 }
 
+fn path_rect(rect: LogicalRect) -> SceneShape {
+    path(vec![
+        PathVerb::MoveTo(point(rect.x(), rect.y())),
+        PathVerb::LineTo(point(rect.max_x(), rect.y())),
+        PathVerb::LineTo(point(rect.max_x(), rect.max_y())),
+        PathVerb::LineTo(point(rect.x(), rect.max_y())),
+        PathVerb::Close,
+    ])
+}
+
 fn gradient_stops(entries: &[(f32, Color)]) -> GradientStops {
     GradientStops::new(
         entries
@@ -402,6 +412,114 @@ fn real_gpu_gradient_transform_clip_stroke_and_rebuild_are_deterministic()
     );
     assert_ne!(rebuilt.target_generation(), first_generation);
     assert_eq!(rebuilt.readback().rgba8_srgb(), first_pixels);
+    Ok(())
+}
+
+#[test]
+fn real_gpu_generic_ellipse_and_path_clips_are_conjunctive_order_invariant_and_rebuildable()
+-> Result<(), Box<dyn Error>> {
+    let Some(mut renderer) = renderer_or_adapterless()? else {
+        return Ok(());
+    };
+    let provider = NoResources;
+    let color = Color::rgb(0x36, 0xB5, 0x6B);
+    let ellipse = ContributionClip::new(
+        SceneShape::ellipse(rect(4.0, 6.0, 40.0, 28.0)),
+        LogicalTransform::translation(4.0, 2.0)?,
+    );
+    let path_clip = ContributionClip::identity(path_rect(rect(20.0, 10.0, 32.0, 24.0)));
+    let item = |clips: [ContributionClip; 2]| {
+        clips.into_iter().fold(
+            PaintContributionItem::fill(
+                SceneShape::rect(rect(
+                    0.0,
+                    0.0,
+                    f32::from(SURFACE_WIDTH),
+                    f32::from(SURFACE_HEIGHT),
+                )),
+                Brush::solid(color),
+            ),
+            PaintContributionItem::with_clip,
+        )
+    };
+    let forward = publication(vec![item([ellipse.clone(), path_clip.clone()])]);
+    let reversed = publication(vec![item([path_clip, ellipse])]);
+
+    let first = renderer.render_offscreen_publication(&forward, &provider)?;
+    assert_eq!(pixel(first.readback(), 28, 22), color_bytes(color));
+    assert_eq!(
+        pixel(first.readback(), 16, 22),
+        [0, 0, 0, 0],
+        "ellipse-only coverage is removed by the path clip"
+    );
+    assert_eq!(
+        pixel(first.readback(), 50, 12),
+        [0, 0, 0, 0],
+        "path-only coverage is removed by the transformed ellipse clip"
+    );
+
+    let first_pixels = first.readback().rgba8_srgb().to_vec();
+    let reversed_output = renderer.render_offscreen_publication(&reversed, &provider)?;
+    assert_eq!(
+        reversed_output.readback().rgba8_srgb(),
+        first_pixels,
+        "conjunctive clip coverage cannot depend on authored clip order"
+    );
+
+    assert!(renderer.discard_offscreen_target());
+    let rebuilt = renderer.render_offscreen_publication(&forward, &provider)?;
+    assert_eq!(
+        rebuilt.update_plan().mode(),
+        PublicationUpdateMode::FullResync
+    );
+    assert_eq!(
+        rebuilt.readback().rgba8_srgb(),
+        first_pixels,
+        "generic clip realization reconstructs identically after target loss"
+    );
+    Ok(())
+}
+
+#[test]
+fn real_gpu_empty_and_singular_generic_clips_erase_coverage() -> Result<(), Box<dyn Error>> {
+    let Some(mut renderer) = renderer_or_adapterless()? else {
+        return Ok(());
+    };
+    let provider = NoResources;
+    let full_item = || {
+        PaintContributionItem::fill(
+            SceneShape::rect(rect(
+                0.0,
+                0.0,
+                f32::from(SURFACE_WIDTH),
+                f32::from(SURFACE_HEIGHT),
+            )),
+            Brush::solid(Color::WHITE),
+        )
+    };
+    let empty = ContributionClip::identity(SceneShape::ellipse(rect(8.0, 8.0, 0.0, 20.0)));
+    let singular = ContributionClip::new(
+        path_rect(rect(8.0, 8.0, 32.0, 24.0)),
+        LogicalTransform::try_new(0.0, 0.0, 0.0, 1.0, 0.0, 0.0)?,
+    );
+    let output = renderer.render_offscreen_publication(
+        &publication(vec![
+            full_item().with_clip(empty),
+            full_item().with_clip(singular),
+        ]),
+        &provider,
+    )?;
+
+    assert!(
+        output
+            .readback()
+            .rgba8_srgb()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| *pixel == [0, 0, 0, 0]),
+        "empty and singular clips must not fall back to full coverage"
+    );
     Ok(())
 }
 
