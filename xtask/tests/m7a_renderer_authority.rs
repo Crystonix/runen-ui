@@ -42,6 +42,7 @@ const ALLOWED_RUNTIME_IDENTIFIERS: &[&str] = &[
     "PaintPublication",
     "PaintRevision",
     "PaintScene",
+    "PaintSceneEntry",
     "PaintSceneItem",
     "RasterScale",
     "SceneCapabilities",
