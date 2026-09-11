@@ -614,24 +614,26 @@ fn real_gpu_atomic_groups_preserve_contraction_clips_opacity_resources_nesting_a
         SceneShape::rect(rect(20.0, 4.0, 8.0, 8.0)),
         Brush::solid(Color::rgb(0x00, 0xFF, 0x00)),
     );
-    let inner = PaintContributionGroup::new(vec![PaintContributionItem::fill(
-        SceneShape::rect(rect(24.0, 24.0, 12.0, 12.0)),
-        Brush::solid(Color::WHITE),
-    )
-    .into()])
+    let inner = PaintContributionGroup::new(vec![
+        PaintContributionItem::fill(
+            SceneShape::rect(rect(24.0, 24.0, 12.0, 12.0)),
+            Brush::solid(Color::WHITE),
+        )
+        .into(),
+    ])
     .with_opacity(half);
     let nested = PaintContributionGroup::new(vec![inner.into()]).with_opacity(half);
-    let image_group = PaintContributionGroup::new(vec![image_item(
-        image_resource,
-        rect(44.0, 24.0, 16.0, 16.0),
-    )
-    .into()])
+    let image_group = PaintContributionGroup::new(vec![
+        image_item(image_resource, rect(44.0, 24.0, 16.0, 16.0)).into(),
+    ])
     .with_opacity(half);
-    let off_surface = PaintContributionGroup::new(vec![PaintContributionItem::fill(
-        SceneShape::rect(rect(80.0, 0.0, 8.0, 8.0)),
-        Brush::solid(Color::WHITE),
-    )
-    .into()]);
+    let off_surface = PaintContributionGroup::new(vec![
+        PaintContributionItem::fill(
+            SceneShape::rect(rect(80.0, 0.0, 8.0, 8.0)),
+            Brush::solid(Color::WHITE),
+        )
+        .into(),
+    ]);
     let publication = grouped_publication(vec![
         PaintContributionGroup::new(Vec::new()).into(),
         contracted.into(),
@@ -704,15 +706,17 @@ fn real_gpu_atomic_groups_preserve_contraction_clips_opacity_resources_nesting_a
         0.0,
         Color::rgba(0x00, 0x00, 0x00, 0x80),
     )?;
-    let shadow_publication = grouped_publication(vec![PaintContributionGroup::new(vec![
-        PaintContributionItem::fill(
-            SceneShape::rect(rect(4.0, 4.0, 8.0, 8.0)),
-            Brush::solid(Color::WHITE),
-        )
+    let shadow_publication = grouped_publication(vec![
+        PaintContributionGroup::new(vec![
+            PaintContributionItem::fill(
+                SceneShape::rect(rect(4.0, 4.0, 8.0, 8.0)),
+                Brush::solid(Color::WHITE),
+            )
+            .into(),
+        ])
+        .with_shadows(vec![shadow])
         .into(),
-    ])
-    .with_shadows(vec![shadow])
-    .into()]);
+    ]);
     assert!(matches!(
         renderer.render_offscreen_publication(&shadow_publication, &NoResources),
         Err(PublicationRenderError::UnsupportedGroupShadows)
