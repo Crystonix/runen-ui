@@ -12,13 +12,13 @@ use runenui_core::SceneOpacity;
 use runenui_runtime::{PaintPublication, PaintScene, PaintSceneEntry, RasterScale};
 use wgpu::util::DeviceExt;
 
-use super::{PublicationRenderError, ResourceSceneItem};
+use super::super::super::{OffscreenExtent, RasterCanvasExtent, texture_extent};
 use super::super::{
     STENCIL_ALLOWED, clear_stencil_mask,
     clip::{self, ClipRenderer, PreparedClip},
     clipped_fill_stencil_state, image, shaped,
 };
-use super::super::super::{OffscreenExtent, RasterCanvasExtent, texture_extent};
+use super::{PublicationRenderError, ResourceSceneItem};
 
 const GROUP_UNIFORM_SIZE: usize = 16;
 
@@ -198,23 +198,17 @@ impl GroupRenderer {
             target_format,
             wgpu::TextureFormat::Rgba8UnormSrgb | wgpu::TextureFormat::Bgra8UnormSrgb
         ) {
-            return Err(super::super::super::OffscreenRenderError::UnsupportedTargetFormat {
-                format: target_format,
-            });
+            return Err(
+                super::super::super::OffscreenRenderError::UnsupportedTargetFormat {
+                    format: target_format,
+                },
+            );
         }
         if !self.pipelines.contains_key(&target_format) {
-            let ordinary = create_group_pipeline(
-                device,
-                target_format,
-                &self.bind_group_layout,
-                false,
-            );
-            let clipped = create_group_pipeline(
-                device,
-                target_format,
-                &self.bind_group_layout,
-                true,
-            );
+            let ordinary =
+                create_group_pipeline(device, target_format, &self.bind_group_layout, false);
+            let clipped =
+                create_group_pipeline(device, target_format, &self.bind_group_layout, true);
             self.pipelines
                 .insert(target_format, GroupTargetPipelines { ordinary, clipped });
         }
@@ -243,7 +237,7 @@ impl GroupRenderer {
         composition: &PreparedComposition,
         shaped_renderer: &shaped::ShapedRunRenderer,
     ) {
-        super::clear_color_target(encoder, color_view);
+        super::super::clear_color_target(encoder, color_view);
         self.encode_entries(
             device,
             solid_renderer,
@@ -362,7 +356,7 @@ impl GroupRenderer {
             view_formats: &[],
         });
         let intermediate_view = intermediate.create_view(&wgpu::TextureViewDescriptor::default());
-        super::clear_color_target(encoder, &intermediate_view);
+        super::super::clear_color_target(encoder, &intermediate_view);
         self.encode_entries(
             device,
             solid_renderer,
