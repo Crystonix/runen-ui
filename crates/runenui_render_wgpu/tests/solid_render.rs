@@ -8,16 +8,18 @@ use std::{
 };
 
 use runenui_core::{
-    Brush, Color, ContributionClip, Element, GradientStop, GradientStops, LinearGradient,
+    Brush, Color, ContributionClip, DropShadow, Element, GradientStop, GradientStops,
+    ImageDescriptor, ImageIntrinsicSize, ImageMapping, ImagePaintDescriptor, LinearGradient,
     LogicalLength, LogicalPoint, LogicalRect, LogicalSize, LogicalTransform, NoHostProtocol,
-    PaintContribution, PaintContributionContext, PaintContributionItem, PathFillRule, PathVerb,
-    RadialGradient, ResourceRef, ScenePath, SceneShape, StrokeCap, StrokeJoin, StrokeStyle,
+    PaintContribution, PaintContributionContext, PaintContributionEntry, PaintContributionGroup,
+    PaintContributionItem, PathFillRule, PathVerb, RadialGradient, ResourceKind, ResourceRef,
+    SceneLayer, SceneOpacity, ScenePath, SceneShape, StrokeCap, StrokeJoin, StrokeStyle,
     StyleEnvironment, UiApp, UnitInterval, Widget, WidgetMeasure,
 };
 use runenui_render_wgpu::{
-    BackendSelection, PublicationUpdateMode, Renderer, RendererInitError, RendererOptions,
-    ResourcePayload, ResourceProvider, ResourceProviderError, ResourceProviderErrorKind,
-    ResourceRequest,
+    BackendSelection, ImagePayload, PublicationRenderError, PublicationUpdateMode, Renderer,
+    RendererInitError, RendererOptions, ResourcePayload, ResourceProvider, ResourceProviderError,
+    ResourceProviderErrorKind, ResourceRequest,
 };
 use runenui_runtime::{
     AppRuntime, LayoutConstraints, PaintPublication, RasterScale, SurfaceBuildContext,
@@ -68,6 +70,48 @@ impl UiApp for FixtureApp {
     }
 }
 
+#[derive(Clone, Debug)]
+struct GroupSceneFixture {
+    entries: Vec<PaintContributionEntry>,
+}
+
+impl Widget<Vec<PaintContributionEntry>> for GroupSceneFixture {
+    type State = Vec<PaintContributionEntry>;
+
+    fn create_state(&self) -> Self::State {
+        self.entries.clone()
+    }
+
+    fn measure(&self, _: &Self::State, _: runenui_core::WidgetMeasureInput) -> WidgetMeasure {
+        WidgetMeasure::measured(
+            LogicalLength::from(SURFACE_WIDTH),
+            LogicalLength::from(SURFACE_HEIGHT),
+        )
+    }
+
+    fn paint(&self, entries: &Self::State, _: PaintContributionContext) -> PaintContribution {
+        PaintContribution::from_entries(entries.clone())
+    }
+}
+
+struct GroupFixtureApp;
+
+impl UiApp for GroupFixtureApp {
+    type State = Vec<PaintContributionEntry>;
+    type Action = Vec<PaintContributionEntry>;
+    type HostProtocol = NoHostProtocol;
+
+    fn root(entries: &Self::State) -> Element<Self::Action> {
+        Element::new(GroupSceneFixture {
+            entries: entries.clone(),
+        })
+    }
+
+    fn update(entries: &mut Self::State, replacement: Self::Action) {
+        *entries = replacement;
+    }
+}
+
 struct NoResources;
 
 impl ResourceProvider for NoResources {
@@ -80,6 +124,36 @@ impl ResourceProvider for NoResources {
             ResourceProviderErrorKind::Malformed,
             "solid-render proof unexpectedly requested a resource",
         ))
+    }
+}
+
+struct SingleImageProvider {
+    resource: ResourceRef,
+    payload: ImagePayload,
+}
+
+impl SingleImageProvider {
+    fn new(resource: ResourceRef) -> Result<Self, Box<dyn Error>> {
+        Ok(Self {
+            resource,
+            payload: ImagePayload::new(1, 1, vec![0xFF, 0x00, 0x00, 0xFF])?,
+        })
+    }
+}
+
+impl ResourceProvider for SingleImageProvider {
+    fn load(
+        &self,
+        resource: &ResourceRef,
+        request: ResourceRequest,
+    ) -> Result<ResourcePayload, ResourceProviderError> {
+        if resource != &self.resource || request != ResourceRequest::Image {
+            return Err(ResourceProviderError::new(
+                ResourceProviderErrorKind::Malformed,
+                "atomic-group proof requested an unexpected resource",
+            ));
+        }
+        Ok(ResourcePayload::Image(self.payload.clone()))
     }
 }
 
@@ -125,6 +199,18 @@ fn gradient_stops(entries: &[(f32, Color)]) -> GradientStops {
     .unwrap_or_else(|_| unreachable!("fixture gradient stops are valid"))
 }
 
+fn image_item(resource: ResourceRef, destination: LogicalRect) -> PaintContributionItem {
+    let descriptor = ImageDescriptor::new(
+        resource,
+        ImageIntrinsicSize::new(1, 1)
+            .unwrap_or_else(|| unreachable!("fixture image extent is non-zero")),
+    )
+    .unwrap_or_else(|_| unreachable!("fixture resource has image kind"));
+    let paint = ImagePaintDescriptor::new(descriptor, destination, ImageMapping::default())
+        .unwrap_or_else(|_| unreachable!("fixture image mapping is valid"));
+    PaintContributionItem::image(paint)
+}
+
 fn publication(items: Vec<PaintContributionItem>) -> PaintPublication {
     let mut runtime = AppRuntime::<FixtureApp>::mount(items);
     let environment = StyleEnvironment::default();
@@ -137,6 +223,22 @@ fn publication(items: Vec<PaintContributionItem>) -> PaintPublication {
     runtime
         .publish_surface(&context)
         .unwrap_or_else(|_| unreachable!("fixture publication is admitted"))
+        .paint_publication()
+        .clone()
+}
+
+fn grouped_publication(entries: Vec<PaintContributionEntry>) -> PaintPublication {
+    let mut runtime = AppRuntime::<GroupFixtureApp>::mount(entries);
+    let environment = StyleEnvironment::default();
+    let logical_size = LogicalSize::try_new(f32::from(SURFACE_WIDTH), f32::from(SURFACE_HEIGHT))
+        .unwrap_or_else(|_| unreachable!("fixture surface extent is valid"));
+    let context = SurfaceBuildContext::new(&environment, LayoutConstraints::tight(logical_size))
+        .with_raster_scale(
+            RasterScale::new(1.0).unwrap_or_else(|_| unreachable!("fixture raster scale is valid")),
+        );
+    runtime
+        .publish_surface(&context)
+        .unwrap_or_else(|_| unreachable!("grouped fixture publication is admitted"))
         .paint_publication()
         .clone()
 }
@@ -477,6 +579,152 @@ fn real_gpu_generic_ellipse_and_path_clips_are_conjunctive_order_invariant_and_r
         first_pixels,
         "generic clip realization reconstructs identically after target loss"
     );
+    Ok(())
+}
+
+#[test]
+fn real_gpu_atomic_groups_preserve_contraction_clips_opacity_resources_nesting_and_rebuild()
+-> Result<(), Box<dyn Error>> {
+    let Some(mut renderer) = renderer_or_adapterless()? else {
+        return Ok(());
+    };
+    let image_resource = ResourceRef::new(ResourceKind::Image);
+    let provider = SingleImageProvider::new(image_resource.clone())?;
+    let half = SceneOpacity::new(0.5)?;
+
+    let contracted = PaintContributionGroup::new(vec![
+        PaintContributionItem::fill(
+            SceneShape::rect(rect(0.0, 0.0, 32.0, 20.0)),
+            Brush::solid(Color::rgb(0xFF, 0x00, 0x00)),
+        )
+        .with_layer(SceneLayer::new(-1))
+        .into(),
+        PaintContributionItem::fill(
+            SceneShape::rect(rect(12.0, 0.0, 24.0, 20.0)),
+            Brush::solid(Color::rgb(0x00, 0x00, 0xFF)),
+        )
+        .with_layer(SceneLayer::new(1))
+        .into(),
+    ])
+    .with_clip(ContributionClip::identity(SceneShape::rect(rect(
+        4.0, 0.0, 28.0, 20.0,
+    ))))
+    .with_opacity(half);
+    let outside = PaintContributionItem::fill(
+        SceneShape::rect(rect(20.0, 4.0, 8.0, 8.0)),
+        Brush::solid(Color::rgb(0x00, 0xFF, 0x00)),
+    );
+    let inner = PaintContributionGroup::new(vec![PaintContributionItem::fill(
+        SceneShape::rect(rect(24.0, 24.0, 12.0, 12.0)),
+        Brush::solid(Color::WHITE),
+    )
+    .into()])
+    .with_opacity(half);
+    let nested = PaintContributionGroup::new(vec![inner.into()]).with_opacity(half);
+    let image_group = PaintContributionGroup::new(vec![image_item(
+        image_resource,
+        rect(44.0, 24.0, 16.0, 16.0),
+    )
+    .into()])
+    .with_opacity(half);
+    let off_surface = PaintContributionGroup::new(vec![PaintContributionItem::fill(
+        SceneShape::rect(rect(80.0, 0.0, 8.0, 8.0)),
+        Brush::solid(Color::WHITE),
+    )
+    .into()]);
+    let publication = grouped_publication(vec![
+        PaintContributionGroup::new(Vec::new()).into(),
+        contracted.into(),
+        outside.into(),
+        nested.into(),
+        image_group.into(),
+        off_surface.into(),
+    ]);
+
+    assert_eq!(publication.scene().groups().len(), 5);
+    assert_eq!(publication.scene().root_entries().len(), 5);
+
+    let first = renderer.render_offscreen_publication(&publication, &provider)?;
+    let readback = first.readback();
+    assert_eq!(
+        pixel(readback, 2, 8),
+        [0, 0, 0, 0],
+        "group clip constrains the complete composed result"
+    );
+
+    let half_red = pixel(readback, 8, 8);
+    assert!(half_red[0] >= 186 && half_red[0] <= 189);
+    assert_eq!([half_red[1], half_red[2]], [0, 0]);
+    assert!(half_red[3].abs_diff(128) <= 1);
+
+    let half_blue = pixel(readback, 16, 8);
+    assert_eq!([half_blue[0], half_blue[1]], [0, 0]);
+    assert!(half_blue[2] >= 186 && half_blue[2] <= 189);
+    assert!(
+        half_blue[3].abs_diff(128) <= 1,
+        "overlapping opaque children receive group opacity once, not per child"
+    );
+
+    assert_eq!(
+        pixel(readback, 22, 8),
+        [0x00, 0xFF, 0x00, 0xFF],
+        "first-member group contraction keeps the outside layer-zero item above the isolated +1 child"
+    );
+
+    let nested_pixel = pixel(readback, 28, 28);
+    for channel in 0..3 {
+        assert!(
+            nested_pixel[channel] >= 135 && nested_pixel[channel] <= 139,
+            "nested half-opacity group channel {channel} is not quarter-premultiplied: {nested_pixel:?}"
+        );
+    }
+    assert!(nested_pixel[3].abs_diff(64) <= 1);
+
+    let image_pixel = pixel(readback, 50, 30);
+    assert!(image_pixel[0] >= 186 && image_pixel[0] <= 189);
+    assert_eq!([image_pixel[1], image_pixel[2]], [0, 0]);
+    assert!(image_pixel[3].abs_diff(128) <= 1);
+    assert_eq!(pixel(readback, 62, 2), [0, 0, 0, 0]);
+
+    let first_generation = first.target_generation();
+    let first_pixels = readback.rgba8_srgb().to_vec();
+    assert!(renderer.discard_offscreen_target());
+    let rebuilt = renderer.render_offscreen_publication(&publication, &provider)?;
+    assert_eq!(
+        rebuilt.update_plan().mode(),
+        PublicationUpdateMode::FullResync
+    );
+    assert_ne!(rebuilt.target_generation(), first_generation);
+    assert_eq!(rebuilt.readback().rgba8_srgb(), first_pixels);
+
+    let shadow = DropShadow::new(
+        2.0,
+        2.0,
+        LogicalLength::new(1.0)?,
+        0.0,
+        Color::rgba(0x00, 0x00, 0x00, 0x80),
+    )?;
+    let shadow_publication = grouped_publication(vec![PaintContributionGroup::new(vec![
+        PaintContributionItem::fill(
+            SceneShape::rect(rect(4.0, 4.0, 8.0, 8.0)),
+            Brush::solid(Color::WHITE),
+        )
+        .into(),
+    ])
+    .with_shadows(vec![shadow])
+    .into()]);
+    assert!(matches!(
+        renderer.render_offscreen_publication(&shadow_publication, &NoResources),
+        Err(PublicationRenderError::UnsupportedGroupShadows)
+    ));
+
+    let unchanged = renderer.render_offscreen_publication(&publication, &provider)?;
+    assert_eq!(
+        unchanged.update_plan().mode(),
+        PublicationUpdateMode::AlreadyCurrent
+    );
+    assert_eq!(unchanged.target_generation(), rebuilt.target_generation());
+    assert_eq!(unchanged.readback().rgba8_srgb(), first_pixels);
     Ok(())
 }
 
