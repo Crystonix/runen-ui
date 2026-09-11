@@ -1,13 +1,11 @@
 use core::{error::Error, fmt};
 
 use runenui_core::{Color, LogicalRect, LogicalTransform, ResourceKind, SceneOpacity};
-use runenui_runtime::PaintSceneItem;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum UnsupportedSceneSemantic {
     Image,
     UnknownPrimitive,
-    CompositionGroup,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -47,21 +45,4 @@ pub(crate) struct SupportedFillRect {
     pub(crate) color: Color,
     pub(crate) opacity: SceneOpacity,
     pub(crate) local_to_surface: LogicalTransform,
-}
-
-/// Fails closed while the current wgpu implementation cannot realize atomic
-/// composition groups. This is renderer capability admission only; the runtime
-/// scene remains the complete neutral authority.
-pub(crate) const fn validate_item_composition(
-    item_index: usize,
-    item: &PaintSceneItem,
-) -> Result<(), SceneValidationError> {
-    if item.group().is_some() {
-        Err(SceneValidationError::UnsupportedItem {
-            item_index,
-            semantic: UnsupportedSceneSemantic::CompositionGroup,
-        })
-    } else {
-        Ok(())
-    }
 }
