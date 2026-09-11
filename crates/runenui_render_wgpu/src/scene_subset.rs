@@ -7,8 +7,6 @@ use runenui_runtime::PaintSceneItem;
 pub(crate) enum UnsupportedSceneSemantic {
     Image,
     UnknownPrimitive,
-    EllipseClip,
-    PathClip,
     CompositionGroup,
 }
 
