@@ -432,6 +432,10 @@ mod tests {
         let prepared = prepare_clips(&clips)
             .unwrap_or_else(|_| unreachable!("accepted clip shapes tessellate"));
         assert_eq!(prepared.len(), clips.len());
-        assert!(prepared.iter().all(|clip| !clip.geometry.indices().is_empty()));
+        assert!(
+            prepared
+                .iter()
+                .all(|clip| !clip.geometry.indices().is_empty())
+        );
     }
 }
