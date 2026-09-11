@@ -357,7 +357,7 @@ fn clear_clip_temp(
     render_pass.draw(0..3, 0..1);
 }
 
-fn stencil_attachment(
+const fn stencil_attachment(
     stencil_view: &wgpu::TextureView,
 ) -> wgpu::RenderPassDepthStencilAttachment<'_> {
     wgpu::RenderPassDepthStencilAttachment {
@@ -384,7 +384,7 @@ fn clip_vertex_bytes(
     let positions = clip.geometry.positions();
     let mut bytes = Vec::with_capacity(clip.geometry.indices().len().saturating_mul(8));
 
-    for triangle in clip.geometry.indices().chunks_exact(3) {
+    for triangle in clip.geometry.indices().as_chunks::<3>().0 {
         let mut polygon = Vec::with_capacity(3);
         for index in triangle {
             let index = usize::try_from(*index)
