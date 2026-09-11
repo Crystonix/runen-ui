@@ -133,9 +133,8 @@ impl core::fmt::Display for PublicationRenderError {
                 formatter,
                 "renderer failed to realize composition-group clip {clip_index}: {detail}"
             ),
-            Self::UnsupportedGroupShadows => formatter.write_str(
-                "renderer does not yet realize ordinary composition-group shadows",
-            ),
+            Self::UnsupportedGroupShadows => formatter
+                .write_str("renderer does not yet realize ordinary composition-group shadows"),
             Self::GradientStopBufferExceedsDeviceLimit {
                 item_index,
                 required_bytes,
