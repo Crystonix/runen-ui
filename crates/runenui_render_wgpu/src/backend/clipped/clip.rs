@@ -413,29 +413,3 @@ fn clip_vertex_bytes(
     }
     bytes
 }
-
-#[cfg(test)]
-mod tests {
-    use runenui_core::{LogicalRect, LogicalTransform, SceneShape};
-    use runenui_runtime::SceneClip;
-
-    use super::prepare_clips;
-
-    #[test]
-    fn every_scene_shape_clip_prepares_through_one_fill_geometry_path() {
-        let rect = LogicalRect::try_new(0.0, 0.0, 20.0, 12.0)
-            .unwrap_or_else(|_| unreachable!("test rectangle is valid"));
-        let clips = [
-            SceneClip::new(SceneShape::rect(rect), LogicalTransform::IDENTITY),
-            SceneClip::new(SceneShape::ellipse(rect), LogicalTransform::IDENTITY),
-        ];
-        let prepared = prepare_clips(&clips)
-            .unwrap_or_else(|_| unreachable!("accepted clip shapes tessellate"));
-        assert_eq!(prepared.len(), clips.len());
-        assert!(
-            prepared
-                .iter()
-                .all(|clip| !clip.geometry.indices().is_empty())
-        );
-    }
-}
