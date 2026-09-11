@@ -243,6 +243,122 @@ fn grouped_publication(entries: Vec<PaintContributionEntry>) -> PaintPublication
         .clone()
 }
 
+fn atomic_group_publication(image_resource: ResourceRef, half: SceneOpacity) -> PaintPublication {
+    let contracted = PaintContributionGroup::new(vec![
+        PaintContributionItem::fill(
+            SceneShape::rect(rect(0.0, 0.0, 32.0, 20.0)),
+            Brush::solid(Color::rgb(0xFF, 0x00, 0x00)),
+        )
+        .with_layer(SceneLayer::new(-1))
+        .into(),
+        PaintContributionItem::fill(
+            SceneShape::rect(rect(12.0, 0.0, 24.0, 20.0)),
+            Brush::solid(Color::rgb(0x00, 0x00, 0xFF)),
+        )
+        .with_layer(SceneLayer::new(1))
+        .into(),
+    ])
+    .with_clip(ContributionClip::identity(SceneShape::rect(rect(
+        4.0, 0.0, 28.0, 20.0,
+    ))))
+    .with_opacity(half);
+    let outside = PaintContributionItem::fill(
+        SceneShape::rect(rect(20.0, 4.0, 8.0, 8.0)),
+        Brush::solid(Color::rgb(0x00, 0xFF, 0x00)),
+    );
+    let inner = PaintContributionGroup::new(vec![
+        PaintContributionItem::fill(
+            SceneShape::rect(rect(24.0, 24.0, 12.0, 12.0)),
+            Brush::solid(Color::WHITE),
+        )
+        .into(),
+    ])
+    .with_opacity(half);
+    let nested = PaintContributionGroup::new(vec![inner.into()]).with_opacity(half);
+    let image_group = PaintContributionGroup::new(vec![
+        image_item(image_resource, rect(44.0, 24.0, 16.0, 16.0)).into(),
+    ])
+    .with_opacity(half);
+    let off_surface = PaintContributionGroup::new(vec![
+        PaintContributionItem::fill(
+            SceneShape::rect(rect(80.0, 0.0, 8.0, 8.0)),
+            Brush::solid(Color::WHITE),
+        )
+        .into(),
+    ]);
+    grouped_publication(vec![
+        PaintContributionGroup::new(Vec::new()).into(),
+        contracted.into(),
+        outside.into(),
+        nested.into(),
+        image_group.into(),
+        off_surface.into(),
+    ])
+}
+
+fn assert_atomic_group_pixels(readback: &runenui_render_wgpu::OffscreenReadback) {
+    assert_eq!(
+        pixel(readback, 2, 8),
+        [0, 0, 0, 0],
+        "group clip constrains the complete composed result"
+    );
+
+    let half_red = pixel(readback, 8, 8);
+    assert!(half_red[0] >= 186 && half_red[0] <= 189);
+    assert_eq!([half_red[1], half_red[2]], [0, 0]);
+    assert!(half_red[3].abs_diff(128) <= 1);
+
+    let half_blue = pixel(readback, 16, 8);
+    assert_eq!([half_blue[0], half_blue[1]], [0, 0]);
+    assert!(half_blue[2] >= 186 && half_blue[2] <= 189);
+    assert!(
+        half_blue[3].abs_diff(128) <= 1,
+        "overlapping opaque children receive group opacity once, not per child"
+    );
+
+    assert_eq!(
+        pixel(readback, 22, 8),
+        [0x00, 0xFF, 0x00, 0xFF],
+        "first-member group contraction keeps the outside layer-zero item above the isolated +1 child"
+    );
+
+    let nested_pixel = pixel(readback, 28, 28);
+    for channel in 0..3 {
+        assert!(
+            nested_pixel[channel] >= 135 && nested_pixel[channel] <= 139,
+            "nested half-opacity group channel {channel} is not quarter-premultiplied: {nested_pixel:?}"
+        );
+    }
+    assert!(nested_pixel[3].abs_diff(64) <= 1);
+
+    let image_pixel = pixel(readback, 50, 30);
+    assert!(image_pixel[0] >= 186 && image_pixel[0] <= 189);
+    assert_eq!([image_pixel[1], image_pixel[2]], [0, 0]);
+    assert!(image_pixel[3].abs_diff(128) <= 1);
+    assert_eq!(pixel(readback, 62, 2), [0, 0, 0, 0]);
+}
+
+fn shadowed_group_publication() -> Result<PaintPublication, Box<dyn Error>> {
+    let shadow = DropShadow::new(
+        2.0,
+        2.0,
+        LogicalLength::new(1.0)?,
+        0.0,
+        Color::rgba(0x00, 0x00, 0x00, 0x80),
+    )?;
+    Ok(grouped_publication(vec![
+        PaintContributionGroup::new(vec![
+            PaintContributionItem::fill(
+                SceneShape::rect(rect(4.0, 4.0, 8.0, 8.0)),
+                Brush::solid(Color::WHITE),
+            )
+            .into(),
+        ])
+        .with_shadows(vec![shadow])
+        .into(),
+    ]))
+}
+
 #[test]
 fn real_gpu_generic_solids_preserve_shape_transform_clip_and_degenerate_semantics()
 -> Result<(), Box<dyn Error>> {
@@ -591,105 +707,16 @@ fn real_gpu_atomic_groups_preserve_contraction_clips_opacity_resources_nesting_a
     let image_resource = ResourceRef::new(ResourceKind::Image);
     let provider = SingleImageProvider::new(image_resource.clone())?;
     let half = SceneOpacity::new(0.5)?;
-
-    let contracted = PaintContributionGroup::new(vec![
-        PaintContributionItem::fill(
-            SceneShape::rect(rect(0.0, 0.0, 32.0, 20.0)),
-            Brush::solid(Color::rgb(0xFF, 0x00, 0x00)),
-        )
-        .with_layer(SceneLayer::new(-1))
-        .into(),
-        PaintContributionItem::fill(
-            SceneShape::rect(rect(12.0, 0.0, 24.0, 20.0)),
-            Brush::solid(Color::rgb(0x00, 0x00, 0xFF)),
-        )
-        .with_layer(SceneLayer::new(1))
-        .into(),
-    ])
-    .with_clip(ContributionClip::identity(SceneShape::rect(rect(
-        4.0, 0.0, 28.0, 20.0,
-    ))))
-    .with_opacity(half);
-    let outside = PaintContributionItem::fill(
-        SceneShape::rect(rect(20.0, 4.0, 8.0, 8.0)),
-        Brush::solid(Color::rgb(0x00, 0xFF, 0x00)),
-    );
-    let inner = PaintContributionGroup::new(vec![
-        PaintContributionItem::fill(
-            SceneShape::rect(rect(24.0, 24.0, 12.0, 12.0)),
-            Brush::solid(Color::WHITE),
-        )
-        .into(),
-    ])
-    .with_opacity(half);
-    let nested = PaintContributionGroup::new(vec![inner.into()]).with_opacity(half);
-    let image_group = PaintContributionGroup::new(vec![
-        image_item(image_resource, rect(44.0, 24.0, 16.0, 16.0)).into(),
-    ])
-    .with_opacity(half);
-    let off_surface = PaintContributionGroup::new(vec![
-        PaintContributionItem::fill(
-            SceneShape::rect(rect(80.0, 0.0, 8.0, 8.0)),
-            Brush::solid(Color::WHITE),
-        )
-        .into(),
-    ]);
-    let publication = grouped_publication(vec![
-        PaintContributionGroup::new(Vec::new()).into(),
-        contracted.into(),
-        outside.into(),
-        nested.into(),
-        image_group.into(),
-        off_surface.into(),
-    ]);
+    let publication = atomic_group_publication(image_resource, half);
 
     assert_eq!(publication.scene().groups().len(), 5);
     assert_eq!(publication.scene().root_entries().len(), 5);
 
     let first = renderer.render_offscreen_publication(&publication, &provider)?;
-    let readback = first.readback();
-    assert_eq!(
-        pixel(readback, 2, 8),
-        [0, 0, 0, 0],
-        "group clip constrains the complete composed result"
-    );
-
-    let half_red = pixel(readback, 8, 8);
-    assert!(half_red[0] >= 186 && half_red[0] <= 189);
-    assert_eq!([half_red[1], half_red[2]], [0, 0]);
-    assert!(half_red[3].abs_diff(128) <= 1);
-
-    let half_blue = pixel(readback, 16, 8);
-    assert_eq!([half_blue[0], half_blue[1]], [0, 0]);
-    assert!(half_blue[2] >= 186 && half_blue[2] <= 189);
-    assert!(
-        half_blue[3].abs_diff(128) <= 1,
-        "overlapping opaque children receive group opacity once, not per child"
-    );
-
-    assert_eq!(
-        pixel(readback, 22, 8),
-        [0x00, 0xFF, 0x00, 0xFF],
-        "first-member group contraction keeps the outside layer-zero item above the isolated +1 child"
-    );
-
-    let nested_pixel = pixel(readback, 28, 28);
-    for channel in 0..3 {
-        assert!(
-            nested_pixel[channel] >= 135 && nested_pixel[channel] <= 139,
-            "nested half-opacity group channel {channel} is not quarter-premultiplied: {nested_pixel:?}"
-        );
-    }
-    assert!(nested_pixel[3].abs_diff(64) <= 1);
-
-    let image_pixel = pixel(readback, 50, 30);
-    assert!(image_pixel[0] >= 186 && image_pixel[0] <= 189);
-    assert_eq!([image_pixel[1], image_pixel[2]], [0, 0]);
-    assert!(image_pixel[3].abs_diff(128) <= 1);
-    assert_eq!(pixel(readback, 62, 2), [0, 0, 0, 0]);
+    assert_atomic_group_pixels(first.readback());
 
     let first_generation = first.target_generation();
-    let first_pixels = readback.rgba8_srgb().to_vec();
+    let first_pixels = first.readback().rgba8_srgb().to_vec();
     assert!(renderer.discard_offscreen_target());
     let rebuilt = renderer.render_offscreen_publication(&publication, &provider)?;
     assert_eq!(
@@ -699,24 +726,7 @@ fn real_gpu_atomic_groups_preserve_contraction_clips_opacity_resources_nesting_a
     assert_ne!(rebuilt.target_generation(), first_generation);
     assert_eq!(rebuilt.readback().rgba8_srgb(), first_pixels);
 
-    let shadow = DropShadow::new(
-        2.0,
-        2.0,
-        LogicalLength::new(1.0)?,
-        0.0,
-        Color::rgba(0x00, 0x00, 0x00, 0x80),
-    )?;
-    let shadow_publication = grouped_publication(vec![
-        PaintContributionGroup::new(vec![
-            PaintContributionItem::fill(
-                SceneShape::rect(rect(4.0, 4.0, 8.0, 8.0)),
-                Brush::solid(Color::WHITE),
-            )
-            .into(),
-        ])
-        .with_shadows(vec![shadow])
-        .into(),
-    ]);
+    let shadow_publication = shadowed_group_publication()?;
     assert!(matches!(
         renderer.render_offscreen_publication(&shadow_publication, &NoResources),
         Err(PublicationRenderError::UnsupportedGroupShadows)
