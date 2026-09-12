@@ -1192,6 +1192,7 @@ fn prepare_resource_scene(
                 let solid = solid::SupportedSolid::stroke(
                     shape,
                     *style,
+                    brush.clone(),
                     item.opacity(),
                     item.local_to_surface(),
                     prepared_clips,
