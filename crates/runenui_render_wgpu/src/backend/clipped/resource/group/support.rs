@@ -11,12 +11,37 @@
 use std::sync::Arc;
 
 use runenui_core::{
-    DropShadow, LogicalPoint, LogicalRect, LogicalTransform, PaintPrimitive, ResourceRef,
-    SceneShape, StrokeStyle,
+    LogicalPoint, LogicalRect, LogicalTransform, PaintPrimitive, ResourceRef, SceneShape,
+    StrokeStyle,
 };
 use runenui_runtime::{PaintSceneItem, SceneClip};
 
 use crate::scene_subset::UnsupportedSceneSemantic;
+
+/// Renderer-private scalar facts frozen from one runtime-published ordinary shadow.
+///
+/// The renderer does not retain the authored/runtime `DropShadow` vocabulary as a
+/// second behavior authority. Only the geometry needed by ADR 0015's neutral
+/// support operation crosses this private realization seam. Shadow color is
+/// intentionally absent because it cannot change neutral support.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct NeutralShadowFacts {
+    spread: f64,
+    offset_x: f64,
+    offset_y: f64,
+    blur_square_half_extent: f64,
+}
+
+impl NeutralShadowFacts {
+    pub(super) fn new(offset_x: f32, offset_y: f32, sigma: f32, spread: f32) -> Self {
+        Self {
+            spread: f64::from(spread),
+            offset_x: f64::from(offset_x),
+            offset_y: f64::from(offset_y),
+            blur_square_half_extent: f64::from(sigma) * 3.0,
+        }
+    }
+}
 
 /// One direct primitive's alpha-independent neutral support authority.
 #[allow(
@@ -143,7 +168,7 @@ impl NeutralSupport {
     /// previous sibling's result.
     pub(super) fn group(
         children: impl IntoIterator<Item = Arc<Self>>,
-        shadows: &[DropShadow],
+        shadows: impl IntoIterator<Item = NeutralShadowFacts>,
         clips: &[SceneClip],
     ) -> Arc<Self> {
         let child = Self::union(children);
@@ -151,27 +176,27 @@ impl NeutralSupport {
             return child;
         }
 
+        let shadows = shadows.into_iter().collect::<Vec<_>>();
         let mut output_members = Vec::with_capacity(shadows.len().saturating_add(1));
         output_members.push(Arc::clone(&child));
         output_members.extend(
             shadows
-                .iter()
-                .copied()
+                .into_iter()
                 .map(|shadow| Self::shadow(Arc::clone(&child), shadow)),
         );
         Self::clipped(Self::union(output_members), clips)
     }
 
-    fn shadow(source: Arc<Self>, shadow: DropShadow) -> Arc<Self> {
+    fn shadow(source: Arc<Self>, shadow: NeutralShadowFacts) -> Arc<Self> {
         if matches!(source.as_ref(), Self::Empty) {
             return source;
         }
         Arc::new(Self::Shadow {
             source,
-            spread: f64::from(shadow.spread()),
-            offset_x: f64::from(shadow.offset_x()),
-            offset_y: f64::from(shadow.offset_y()),
-            blur_square_half_extent: f64::from(shadow.sigma().get()) * 3.0,
+            spread: shadow.spread,
+            offset_x: shadow.offset_x,
+            offset_y: shadow.offset_y,
+            blur_square_half_extent: shadow.blur_square_half_extent,
         })
     }
 
@@ -193,7 +218,7 @@ mod tests {
 
     use runenui_core::{Color, DropShadow, LogicalLength, LogicalRect, LogicalTransform};
 
-    use super::{NeutralPrimitiveSupport, NeutralSupport};
+    use super::{NeutralPrimitiveSupport, NeutralShadowFacts, NeutralSupport};
 
     fn rect() -> LogicalRect {
         LogicalRect::try_new(0.0, 0.0, 8.0, 6.0)
@@ -218,11 +243,25 @@ mod tests {
         .unwrap_or_else(|_| unreachable!("controlled shadow is valid"))
     }
 
+    fn facts(shadow: DropShadow) -> NeutralShadowFacts {
+        NeutralShadowFacts::new(
+            shadow.offset_x(),
+            shadow.offset_y(),
+            shadow.sigma().get(),
+            shadow.spread(),
+        )
+    }
+
     #[test]
     fn shadow_color_alpha_cannot_change_neutral_support() {
-        let transparent =
-            NeutralSupport::shadow(source(), shadow(Color::rgba(0x10, 0x20, 0x30, 0x00)));
-        let opaque = NeutralSupport::shadow(source(), shadow(Color::rgba(0xF0, 0xE0, 0xD0, 0xFF)));
+        let transparent = NeutralSupport::shadow(
+            source(),
+            facts(shadow(Color::rgba(0x10, 0x20, 0x30, 0x00))),
+        );
+        let opaque = NeutralSupport::shadow(
+            source(),
+            facts(shadow(Color::rgba(0xF0, 0xE0, 0xD0, 0xFF))),
+        );
         assert_eq!(transparent, opaque);
     }
 
@@ -230,18 +269,20 @@ mod tests {
     fn sibling_shadows_share_one_pre_shadow_source() {
         let child = source();
         let shadows = [
-            shadow(Color::rgba(0x00, 0x00, 0x00, 0x40)),
-            DropShadow::new(
-                -1.0,
-                5.0,
-                LogicalLength::new(2.0)
-                    .unwrap_or_else(|_| unreachable!("controlled sigma is valid")),
-                3.0,
-                Color::rgba(0xFF, 0x00, 0x00, 0x80),
-            )
-            .unwrap_or_else(|_| unreachable!("controlled shadow is valid")),
+            facts(shadow(Color::rgba(0x00, 0x00, 0x00, 0x40))),
+            facts(
+                DropShadow::new(
+                    -1.0,
+                    5.0,
+                    LogicalLength::new(2.0)
+                        .unwrap_or_else(|_| unreachable!("controlled sigma is valid")),
+                    3.0,
+                    Color::rgba(0xFF, 0x00, 0x00, 0x80),
+                )
+                .unwrap_or_else(|_| unreachable!("controlled shadow is valid")),
+            ),
         ];
-        let support = NeutralSupport::group([Arc::clone(&child)], &shadows, &[]);
+        let support = NeutralSupport::group([Arc::clone(&child)], shadows, &[]);
         let NeutralSupport::Union(members) = support.as_ref() else {
             panic!("child plus two shadows must remain a support union");
         };
@@ -257,7 +298,10 @@ mod tests {
 
     #[test]
     fn neutral_shadow_support_freezes_spread_offset_and_three_sigma_envelope() {
-        let support = NeutralSupport::shadow(source(), shadow(Color::rgba(0x00, 0x00, 0x00, 0x80)));
+        let support = NeutralSupport::shadow(
+            source(),
+            facts(shadow(Color::rgba(0x00, 0x00, 0x00, 0x80))),
+        );
         let NeutralSupport::Shadow {
             spread,
             offset_x,

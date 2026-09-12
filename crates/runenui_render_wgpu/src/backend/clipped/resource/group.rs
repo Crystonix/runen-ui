@@ -183,7 +183,14 @@ fn prepare_entries(
             )?;
             let neutral_support = support::NeutralSupport::group(
                 entries.iter().map(PreparedSceneEntry::neutral_support),
-                group.shadows(),
+                group.shadows().iter().map(|shadow| {
+                    support::NeutralShadowFacts::new(
+                        shadow.offset_x(),
+                        shadow.offset_y(),
+                        shadow.sigma().get(),
+                        shadow.spread(),
+                    )
+                }),
                 group.clips(),
             );
             Ok(PreparedSceneEntry::Group(PreparedGroup {
