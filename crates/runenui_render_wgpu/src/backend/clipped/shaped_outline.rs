@@ -1,10 +1,10 @@
 //! Renderer-private exact outline normalization for already-shaped text.
 //!
 //! The retained `ShapedTextResource` remains the sole logical text authority. This
-//! module performs one deterministic Skrifa traversal into scale-independent f64
+//! module performs one deterministic Skrifa traversal into scale-independent `f64`
 //! outline verbs. MSDF realization may consume those verbs without narrowing the
 //! existing geometry path; ADR 0015 neutral support projects the same verbs into
-//! positioned RunenUI `ScenePath` geometry. Raster scale, atlas state, sampled alpha,
+//! positioned `RunenUI` `ScenePath` geometry. Raster scale, atlas state, sampled alpha,
 //! paint alpha, target state, and device state are deliberately absent.
 
 use std::{
@@ -103,7 +103,7 @@ impl UniqueGlyphOutline {
 }
 
 /// Resolves each distinct glyph id exactly once into normalized renderer-private
-/// f64 outline geometry. Missing scalable/intrinsic representation remains valid
+/// `f64` outline geometry. Missing scalable/intrinsic representation remains valid
 /// non-painting content, matching the established shaped-text renderer contract.
 pub(super) fn resolve_unique_outlines(
     resource: &ShapedTextResource,
@@ -189,9 +189,9 @@ pub(super) fn resolve_unique_outlines(
 }
 
 /// Resolves painting glyph occurrences into positioned resource-local logical
-/// `ScenePath` values. Distinct glyph ids share one f64 extraction, while every
+/// `ScenePath` values. Distinct glyph ids share one `f64` extraction, while every
 /// shaped occurrence retains its exact logical position before the final checked
-/// narrowing into RunenUI's logical f32 coordinate vocabulary.
+/// narrowing into `RunenUI`'s logical `f32` coordinate vocabulary.
 pub(super) fn resolve_positioned_paths(
     resource: &ShapedTextResource,
     run_origin: LogicalPoint,
@@ -206,10 +206,12 @@ pub(super) fn resolve_positioned_paths(
         let Some(Some(outline)) = by_id.get(&glyph.id()).copied() else {
             continue;
         };
-        let positioned = positioned_scene_path(outline, *glyph, run_origin, resource.font_size())
-            .map_err(|()| OutlineResolveFailure::InvalidOutline {
-            glyph_id: glyph.id(),
-        })?;
+        let positioned =
+            positioned_scene_path(outline, *glyph, run_origin, resource.font_size()).map_err(
+                |()| OutlineResolveFailure::InvalidOutline {
+                    glyph_id: glyph.id(),
+                },
+            )?;
         if !positioned.is_coverage_empty() {
             paths.push(positioned);
         }
@@ -217,10 +219,22 @@ pub(super) fn resolve_positioned_paths(
     Ok(paths)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ContourState {
+    Closed,
+    OpenMoveOnly,
+    OpenSegmentBearing,
+}
+
+impl ContourState {
+    const fn is_open(self) -> bool {
+        !matches!(self, Self::Closed)
+    }
+}
+
 struct OutlinePathPen {
     verbs: Vec<OutlineVerb>,
-    contour_open: bool,
-    has_segment: bool,
+    contour: ContourState,
     has_any_segment: bool,
     invalid: bool,
     skew: f64,
@@ -231,8 +245,7 @@ impl OutlinePathPen {
         let skew = faux_skew.map_or(0.0, f64::from).tan();
         Self {
             verbs: Vec::new(),
-            contour_open: false,
-            has_segment: false,
+            contour: ContourState::Closed,
             has_any_segment: false,
             invalid: !skew.is_finite(),
             skew,
@@ -250,11 +263,10 @@ impl OutlinePathPen {
     }
 
     fn finish_contour(&mut self) {
-        if self.contour_open && self.has_segment {
+        if matches!(self.contour, ContourState::OpenSegmentBearing) {
             self.verbs.push(OutlineVerb::Close);
         }
-        self.contour_open = false;
-        self.has_segment = false;
+        self.contour = ContourState::Closed;
     }
 
     fn finish(mut self) -> Result<Option<GlyphOutline>, ()> {
@@ -267,8 +279,8 @@ impl OutlinePathPen {
         }))
     }
 
-    fn mark_segment(&mut self) {
-        self.has_segment = true;
+    const fn mark_segment(&mut self) {
+        self.contour = ContourState::OpenSegmentBearing;
         self.has_any_segment = true;
     }
 }
@@ -278,7 +290,7 @@ impl OutlinePen for OutlinePathPen {
         self.finish_contour();
         if let Some(point) = self.point(x, y) {
             self.verbs.push(OutlineVerb::MoveTo(point));
-            self.contour_open = true;
+            self.contour = ContourState::OpenMoveOnly;
         }
     }
 
@@ -286,7 +298,7 @@ impl OutlinePen for OutlinePathPen {
         let Some(to) = self.point(x, y) else {
             return;
         };
-        if !self.contour_open {
+        if !self.contour.is_open() {
             self.invalid = true;
             return;
         }
@@ -301,7 +313,7 @@ impl OutlinePen for OutlinePathPen {
         let Some(to) = self.point(x, y) else {
             return;
         };
-        if !self.contour_open {
+        if !self.contour.is_open() {
             self.invalid = true;
             return;
         }
@@ -319,7 +331,7 @@ impl OutlinePen for OutlinePathPen {
         let Some(to) = self.point(x, y) else {
             return;
         };
-        if !self.contour_open {
+        if !self.contour.is_open() {
             self.invalid = true;
             return;
         }
