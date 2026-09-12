@@ -436,7 +436,7 @@ fn rasterize_triangle(mask: &mut RasterMask, a: [f64; 2], b: [f64; 2], c: [f64; 
         for x in start_x..end_x {
             let px = mask.origin_x + usize_as_f64(x) + 0.5;
             if point_in_triangle([px, py], a, b, c) {
-                mask.samples[y * width + x] = 1;
+                mask.samples[y * width + x] = u8::MAX;
             }
         }
     }
@@ -500,7 +500,7 @@ fn union_pair(
         for x in 0..width_usize {
             let surface_x = origin_x + usize_as_f64(x) + 0.5;
             if left.sample(surface_x, surface_y) != 0 || right.sample(surface_x, surface_y) != 0 {
-                result.samples[y * width_usize + x] = 1;
+                result.samples[y * width_usize + x] = u8::MAX;
             }
         }
     }
@@ -560,7 +560,7 @@ fn dilate_euclidean(
     let threshold = radius * radius;
     let samples = distances
         .into_iter()
-        .map(|distance| u8::from(distance <= threshold))
+        .map(|distance| if distance <= threshold { u8::MAX } else { 0 })
         .collect();
     Ok(RasterMask { samples, ..padded })
 }
@@ -590,7 +590,11 @@ fn erode_euclidean(
                 continue;
             }
             let padded_index = (y + pad_usize) * padded_width + x + pad_usize;
-            samples[source_index] = u8::from(distances[padded_index] > threshold);
+            samples[source_index] = if distances[padded_index] > threshold {
+                u8::MAX
+            } else {
+                0
+            };
         }
     }
     Ok(RasterMask {
@@ -782,7 +786,11 @@ fn square_dilate(
                 .saturating_add(kernel_radius)
                 .saturating_add(1)
                 .min(height);
-            samples[y * width + x] = u8::from(prefix[end] != prefix[start]);
+            samples[y * width + x] = if prefix[end] != prefix[start] {
+                u8::MAX
+            } else {
+                0
+            };
         }
     }
     Ok(RasterMask { samples, ..padded })
@@ -815,14 +823,14 @@ fn gaussian_blur(
     let mut horizontal = zeroed_vec(padded.samples.len(), 0.0_f64)?;
     for y in 0..height {
         for x in 0..width {
-            let mut value = weights[0] * f64::from(padded.samples[y * width + x]);
+            let mut value = weights[0] * u8_to_unit(padded.samples[y * width + x]);
             for (offset, &weight) in weights.iter().enumerate().skip(1) {
                 if let Some(left) = x.checked_sub(offset) {
-                    value = weight.mul_add(f64::from(padded.samples[y * width + left]), value);
+                    value = weight.mul_add(u8_to_unit(padded.samples[y * width + left]), value);
                 }
                 let right = x + offset;
                 if right < width {
-                    value = weight.mul_add(f64::from(padded.samples[y * width + right]), value);
+                    value = weight.mul_add(u8_to_unit(padded.samples[y * width + right]), value);
                 }
             }
             horizontal[y * width + x] = value;
@@ -1002,6 +1010,10 @@ fn usize_as_f64(value: usize) -> f64 {
     )
 }
 
+fn u8_to_unit(value: u8) -> f64 {
+    f64::from(value) / f64::from(u8::MAX)
+}
+
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -1045,6 +1057,28 @@ mod tests {
     fn target() -> OffscreenExtent {
         OffscreenExtent::new(64, 48)
             .unwrap_or_else(|_| unreachable!("controlled target is non-zero"))
+    }
+
+    #[test]
+    fn zero_blur_support_reaches_alpha_mask_as_full_coverage() {
+        let shadow = prepare_visual_shadow(
+            &rect_support(),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            RasterScale::ONE,
+            canvas(),
+            target(),
+            limits(),
+        )
+        .unwrap_or_else(|_| unreachable!("controlled mask resolves"))
+        .unwrap_or_else(|| unreachable!("rectangle support remains visible"));
+        assert_eq!(shadow.origin_x(), 0);
+        assert_eq!(shadow.origin_y(), 0);
+        assert_eq!(shadow.width(), 8);
+        assert_eq!(shadow.height(), 8);
+        assert!(shadow.alpha().iter().all(|sample| *sample == u8::MAX));
     }
 
     #[test]
