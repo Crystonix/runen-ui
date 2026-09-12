@@ -203,13 +203,12 @@ pub(super) fn resolve_positioned_paths(
         .collect::<HashMap<_, _>>();
     let mut paths = Vec::new();
     for glyph in resource.glyphs() {
-        let Some(Some(outline)) = by_id.get(&glyph.id()).copied() else {
+        let glyph_id = glyph.id();
+        let Some(Some(outline)) = by_id.get(&glyph_id).copied() else {
             continue;
         };
         let positioned = positioned_scene_path(outline, *glyph, run_origin, resource.font_size())
-            .map_err(|()| OutlineResolveFailure::InvalidOutline {
-                glyph_id: glyph.id(),
-            })?;
+            .map_err(|()| OutlineResolveFailure::InvalidOutline { glyph_id })?;
         if !positioned.is_coverage_empty() {
             paths.push(positioned);
         }
