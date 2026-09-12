@@ -1,16 +1,21 @@
 //! Renderer-private realization of runtime-published atomic paint groups.
 //!
 //! Runtime remains the sole composition authority. This module copies only the
-//! already-contracted `PaintScene` entry structure while preparing group clips,
-//! renders each group into a disposable full-surface intermediate, and composites
-//! that premultiplied result exactly once into its parent. Ordinary shadows remain
-//! deliberately fail-closed until their separate ADR 0015 checkpoint.
+//! already-contracted `PaintScene` entry structure while preparing group clips
+//! and ADR 0015's alpha-independent symbolic neutral support. Group color is
+//! rendered into a disposable full-surface intermediate and composited exactly
+//! once into its parent. Ordinary-shadow visual realization remains deliberately
+//! fail-closed until the prepared neutral support is consumed by that checkpoint.
 
-use std::collections::HashMap;
+mod support;
+
+use std::{collections::HashMap, sync::Arc};
 
 use runenui_core::SceneOpacity;
 use runenui_runtime::{PaintPublication, PaintScene, PaintSceneEntry, RasterScale};
 use wgpu::util::DeviceExt;
+
+use crate::scene_subset::SceneValidationError;
 
 use super::super::super::{OffscreenExtent, RasterCanvasExtent, texture_extent};
 use super::super::{
@@ -75,8 +80,22 @@ impl PreparedComposition {
 
 #[derive(Clone, Debug, PartialEq)]
 enum PreparedSceneEntry {
-    Item(usize),
+    Item {
+        item_index: usize,
+        neutral_support: Arc<support::NeutralSupport>,
+    },
     Group(PreparedGroup),
+}
+
+impl PreparedSceneEntry {
+    fn neutral_support(&self) -> Arc<support::NeutralSupport> {
+        match self {
+            Self::Item {
+                neutral_support, ..
+            } => Arc::clone(neutral_support),
+            Self::Group(group) => Arc::clone(&group.neutral_support),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -84,17 +103,28 @@ struct PreparedGroup {
     entries: Vec<PreparedSceneEntry>,
     clips: Vec<PreparedClip>,
     opacity: SceneOpacity,
+    neutral_support: Arc<support::NeutralSupport>,
 }
 
 pub(super) fn prepare(scene: &PaintScene) -> Result<PreparedComposition, PublicationRenderError> {
     let mut has_groups = false;
+    let mut has_shadows = false;
     let mut needs_stencil = false;
     let root_entries = prepare_entries(
         scene,
         scene.root_entries(),
         &mut has_groups,
+        &mut has_shadows,
         &mut needs_stencil,
     )?;
+    let _scene_neutral_support = support::NeutralSupport::union(
+        root_entries
+            .iter()
+            .map(PreparedSceneEntry::neutral_support),
+    );
+    if has_shadows {
+        return Err(PublicationRenderError::UnsupportedGroupShadows);
+    }
     Ok(PreparedComposition {
         root_entries,
         has_groups,
@@ -106,6 +136,7 @@ fn prepare_entries(
     scene: &PaintScene,
     entries: &[PaintSceneEntry],
     has_groups: &mut bool,
+    has_shadows: &mut bool,
     needs_stencil: &mut bool,
 ) -> Result<Vec<PreparedSceneEntry>, PublicationRenderError> {
     entries
@@ -113,8 +144,21 @@ fn prepare_entries(
         .copied()
         .map(|entry| {
             if let Some(item_index) = entry.item_index() {
-                debug_assert!(item_index < scene.items().len());
-                return Ok(PreparedSceneEntry::Item(item_index));
+                let item = scene.items().get(item_index).unwrap_or_else(|| {
+                    unreachable!("runtime composition item index resolves")
+                });
+                let neutral_support = support::NeutralSupport::from_item(item).map_err(
+                    |semantic| {
+                        super::scene_failure(SceneValidationError::UnsupportedItem {
+                            item_index,
+                            semantic,
+                        })
+                    },
+                )?;
+                return Ok(PreparedSceneEntry::Item {
+                    item_index,
+                    neutral_support,
+                });
             }
 
             let group_id = entry
@@ -124,9 +168,7 @@ fn prepare_entries(
                 .group(group_id)
                 .unwrap_or_else(|| unreachable!("runtime scene group reference resolves"));
             *has_groups = true;
-            if !group.shadows().is_empty() {
-                return Err(PublicationRenderError::UnsupportedGroupShadows);
-            }
+            *has_shadows |= !group.shadows().is_empty();
             let clips = clip::prepare_clips(group.clips()).map_err(|failure| {
                 PublicationRenderError::GroupClipGeometry {
                     clip_index: failure.clip_index(),
@@ -134,11 +176,23 @@ fn prepare_entries(
                 }
             })?;
             *needs_stencil |= !clips.is_empty();
-            let entries = prepare_entries(scene, group.entries(), has_groups, needs_stencil)?;
+            let entries = prepare_entries(
+                scene,
+                group.entries(),
+                has_groups,
+                has_shadows,
+                needs_stencil,
+            )?;
+            let neutral_support = support::NeutralSupport::group(
+                entries.iter().map(PreparedSceneEntry::neutral_support),
+                group.shadows(),
+                group.clips(),
+            );
             Ok(PreparedSceneEntry::Group(PreparedGroup {
                 entries,
                 clips,
                 opacity: group.opacity(),
+                neutral_support,
             }))
         })
         .collect()
@@ -281,7 +335,7 @@ impl GroupRenderer {
     ) {
         for entry in entries {
             match entry {
-                PreparedSceneEntry::Item(item_index) => {
+                PreparedSceneEntry::Item { item_index, .. } => {
                     let item = scene.get(*item_index).unwrap_or_else(|| {
                         unreachable!("runtime composition item index resolves in prepared scene")
                     });
