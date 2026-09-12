@@ -4,9 +4,9 @@
 //! module therefore retains only renderer-neutral publication geometry and exact
 //! set operations. It deliberately carries no brush/foreground alpha, image
 //! payload alpha, item/group opacity, antialiasing, MSDF samples, raster scale,
-//! target extent, or cache/device state. Visual rasterization remains a later
-//! disposable realization of this symbolic support; nested groups must propagate
-//! this expression rather than rendered pixels.
+//! target extent, or cache/device state. Disposable raster realization consumes
+//! this symbolic support directly; nested groups still propagate the expression
+//! rather than rendered pixels.
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -49,10 +49,6 @@ impl NeutralShadowFacts {
 }
 
 /// One direct primitive's alpha-independent neutral support authority.
-#[allow(
-    dead_code,
-    reason = "the complete primitive facts are prepared now and consumed by the immediately following ordinary-shadow visual realization checkpoint"
-)]
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum NeutralPrimitiveSupport {
     Fill {
@@ -87,10 +83,6 @@ pub(super) enum NeutralPrimitiveSupport {
 /// square. Shadow color is intentionally absent because alpha cannot shrink
 /// neutral support. `Clip` is outside child-plus-shadow union, matching group
 /// effect ordering.
-#[allow(
-    dead_code,
-    reason = "symbolic support is reconstructed and structurally validated in this checkpoint before the next checkpoint consumes every field for disposable visual realization"
-)]
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum NeutralSupport {
     Empty,
