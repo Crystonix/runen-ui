@@ -120,12 +120,10 @@ impl NeutralSupport {
                     .ok_or(UnsupportedSceneSemantic::Image)?;
                 let destinations = (0..patch_count)
                     .map(|patch_index| {
-                        image
-                            .resolved_patch(patch_index)
-                            .map(|(_, destination)| destination)
-                            .unwrap_or_else(|| {
-                                unreachable!("runtime-resolved image patch count is exact")
-                            })
+                        image.resolved_patch(patch_index).map_or_else(
+                            || unreachable!("runtime-resolved image patch count is exact"),
+                            |(_, destination)| destination,
+                        )
                     })
                     .collect::<Vec<_>>();
                 if destinations.is_empty() {
