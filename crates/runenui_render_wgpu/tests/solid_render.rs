@@ -737,8 +737,8 @@ fn real_gpu_atomic_groups_preserve_contraction_clips_opacity_resources_nesting_a
 }
 
 #[test]
-fn real_gpu_ordinary_group_shadow_renders_behind_child_and_rebuilds()
--> Result<(), Box<dyn Error>> {
+fn real_gpu_ordinary_group_shadow_renders_behind_child_and_rebuilds() -> Result<(), Box<dyn Error>>
+{
     let Some(mut renderer) = renderer_or_adapterless()? else {
         return Ok(());
     };
