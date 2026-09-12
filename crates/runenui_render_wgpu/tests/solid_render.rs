@@ -780,6 +780,86 @@ fn real_gpu_ordinary_group_shadow_renders_behind_child_and_rebuilds() -> Result<
 }
 
 #[test]
+fn real_gpu_shadow_support_ignores_child_alpha_and_preserves_sibling_and_group_order()
+-> Result<(), Box<dyn Error>> {
+    let Some(mut renderer) = renderer_or_adapterless()? else {
+        return Ok(());
+    };
+
+    let transparent_child = PaintContributionItem::fill(
+        SceneShape::rect(rect(16.0, 16.0, 8.0, 8.0)),
+        Brush::solid(Color::rgba(0xFF, 0xFF, 0xFF, 0x00)),
+    );
+    let expanded_red = DropShadow::new(
+        0.0,
+        0.0,
+        LogicalLength::new(0.0)?,
+        4.0,
+        Color::rgba(0xFF, 0x00, 0x00, 0x80),
+    )?;
+    let compact_blue = DropShadow::new(
+        0.0,
+        0.0,
+        LogicalLength::new(0.0)?,
+        0.0,
+        Color::rgba(0x00, 0x00, 0xFF, 0x80),
+    )?;
+    let sibling_group = PaintContributionGroup::new(vec![transparent_child.into()])
+        .with_shadows(vec![expanded_red, compact_blue]);
+
+    let clipped_child = PaintContributionItem::fill(
+        SceneShape::rect(rect(40.0, 16.0, 8.0, 8.0)),
+        Brush::solid(Color::rgba(0xFF, 0xFF, 0xFF, 0x00)),
+    );
+    let opaque_green = DropShadow::new(
+        0.0,
+        0.0,
+        LogicalLength::new(0.0)?,
+        0.0,
+        Color::rgb(0x00, 0xFF, 0x00),
+    )?;
+    let clipped_half_group = PaintContributionGroup::new(vec![clipped_child.into()])
+        .with_shadows(vec![opaque_green])
+        .with_clip(ContributionClip::identity(SceneShape::rect(rect(
+            44.0, 16.0, 4.0, 8.0,
+        ))))
+        .with_opacity(SceneOpacity::new(0.5)?);
+
+    let publication = grouped_publication(vec![sibling_group.into(), clipped_half_group.into()]);
+    let output = renderer.render_offscreen_publication(&publication, &NoResources)?;
+    let readback = output.readback();
+
+    let expanded_only = pixel(readback, 13, 20);
+    assert!(expanded_only[0] > 0 && expanded_only[3] > 0);
+    assert_eq!([expanded_only[1], expanded_only[2]], [0, 0]);
+
+    let sibling_overlap = pixel(readback, 20, 20);
+    assert!(sibling_overlap[0] > 0 && sibling_overlap[2] > 0);
+    assert!(
+        sibling_overlap[2] > sibling_overlap[0],
+        "later authored blue shadow must source-over above earlier red shadow: {sibling_overlap:?}"
+    );
+    assert!(
+        sibling_overlap[3] > expanded_only[3],
+        "independent sibling shadows overlap without chaining support: {sibling_overlap:?}"
+    );
+
+    assert_eq!(
+        pixel(readback, 42, 20),
+        [0, 0, 0, 0],
+        "group clip must constrain the complete shadow result"
+    );
+    let clipped_half = pixel(readback, 46, 20);
+    assert_eq!([clipped_half[0], clipped_half[2]], [0, 0]);
+    assert!(clipped_half[1] >= 186 && clipped_half[1] <= 189);
+    assert!(
+        clipped_half[3].abs_diff(128) <= 1,
+        "group opacity must apply exactly once after shadow clipping: {clipped_half:?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn real_gpu_empty_and_singular_generic_clips_erase_coverage() -> Result<(), Box<dyn Error>> {
     let Some(mut renderer) = renderer_or_adapterless()? else {
         return Ok(());
