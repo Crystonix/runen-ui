@@ -123,12 +123,12 @@ pub(super) fn prepare_visual_shadow(
     if source.is_empty() {
         return Ok(None);
     }
-    source.origin_x += offset_x * scale;
-    source.origin_y += offset_y * scale;
+    source.origin_x = offset_x.mul_add(scale, source.origin_x);
+    source.origin_y = offset_y.mul_add(scale, source.origin_y);
     let sigma = blur_square_half_extent / 3.0 * scale;
     let blur_radius = blur_square_half_extent * scale;
     let blurred = gaussian_blur(source, sigma, blur_radius, limits)?;
-    crop_to_final_canvas(blurred, canvas_extent, target_extent, limits)
+    crop_to_final_canvas(&blurred, canvas_extent, target_extent, limits)
 }
 
 fn rasterize_support(
@@ -154,8 +154,8 @@ fn rasterize_support(
             if shadow.is_empty() {
                 return Ok(None);
             }
-            shadow.origin_x += *offset_x * scale;
-            shadow.origin_y += *offset_y * scale;
+            shadow.origin_x = (*offset_x).mul_add(scale, shadow.origin_x);
+            shadow.origin_y = (*offset_y).mul_add(scale, shadow.origin_y);
             square_dilate(shadow, *blur_square_half_extent * scale, limits).map(Some)
         }
         NeutralSupport::Clip { source, clips } => {
@@ -452,11 +452,14 @@ fn point_in_triangle(point: [f64; 2], a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> 
 }
 
 fn triangle_area2(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
-    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    (b[1] - a[1]).mul_add(-(c[0] - a[0]), (b[0] - a[0]) * (c[1] - a[1]))
 }
 
 fn edge_sign(point: [f64; 2], from: [f64; 2], to: [f64; 2]) -> f64 {
-    (point[0] - to[0]) * (from[1] - to[1]) - (from[0] - to[0]) * (point[1] - to[1])
+    (from[0] - to[0]).mul_add(
+        -(point[1] - to[1]),
+        (point[0] - to[0]) * (from[1] - to[1]),
+    )
 }
 
 fn merge_masks(
@@ -467,13 +470,13 @@ fn merge_masks(
     match (current, next) {
         (None, next) => Ok(next),
         (current, None) => Ok(current),
-        (Some(current), Some(next)) => union_pair(current, next, limits).map(Some),
+        (Some(current), Some(next)) => union_pair(&current, &next, limits).map(Some),
     }
 }
 
 fn union_pair(
-    left: RasterMask,
-    right: RasterMask,
+    left: &RasterMask,
+    right: &RasterMask,
     limits: MaskLimits,
 ) -> Result<RasterMask, MaskError> {
     let min_x = left.origin_x.min(right.origin_x);
@@ -539,19 +542,22 @@ fn signed_euclidean_spread(
         return Ok(mask);
     }
     if radius > 0.0 {
-        dilate_euclidean(mask, radius, limits)
+        dilate_euclidean(&mask, radius, limits)
     } else {
-        erode_euclidean(mask, -radius, limits)
+        erode_euclidean(&mask, -radius, limits)
     }
 }
 
 fn dilate_euclidean(
-    mask: RasterMask,
+    mask: &RasterMask,
     radius: f64,
     limits: MaskLimits,
 ) -> Result<RasterMask, MaskError> {
+    if radius <= 0.0 || mask.is_empty() {
+        return Ok(mask.clone());
+    }
     let pad = radius_pad(radius, 0)?;
-    let padded = pad_mask(&mask, pad, limits)?;
+    let padded = pad_mask(mask, pad, limits)?;
     let distances =
         squared_distance_transform(&padded.samples, padded.width, padded.height, true, limits)?;
     let threshold = radius * radius;
@@ -563,12 +569,15 @@ fn dilate_euclidean(
 }
 
 fn erode_euclidean(
-    mask: RasterMask,
+    mask: &RasterMask,
     radius: f64,
     limits: MaskLimits,
 ) -> Result<RasterMask, MaskError> {
+    if radius <= 0.0 || mask.is_empty() {
+        return Ok(mask.clone());
+    }
     let pad = radius_pad(radius, 1)?;
-    let padded = pad_mask(&mask, pad, limits)?;
+    let padded = pad_mask(mask, pad, limits)?;
     let distances =
         squared_distance_transform(&padded.samples, padded.width, padded.height, false, limits)?;
     let threshold = radius * radius;
@@ -587,7 +596,13 @@ fn erode_euclidean(
             samples[source_index] = u8::from(distances[padded_index] > threshold);
         }
     }
-    Ok(RasterMask { samples, ..mask })
+    Ok(RasterMask {
+        origin_x: mask.origin_x,
+        origin_y: mask.origin_y,
+        width: mask.width,
+        height: mask.height,
+        samples,
+    })
 }
 
 fn radius_pad(radius: f64, extra: u32) -> Result<u32, MaskError> {
@@ -666,7 +681,7 @@ fn squared_distance_transform(
             &column,
             &mut transformed,
             &mut locations[..height],
-            &mut boundaries[..height + 1],
+            &mut boundaries[..=height],
         );
         for y in 0..height {
             intermediate[y * width + x] = transformed[y];
@@ -681,7 +696,7 @@ fn squared_distance_transform(
             &row,
             &mut row_transformed,
             &mut locations[..width],
-            &mut boundaries[..width + 1],
+            &mut boundaries[..=width],
         );
         result[start..start + width].copy_from_slice(&row_transformed);
     }
@@ -709,20 +724,25 @@ fn edt_1d(input: &[f64], output: &mut [f64], locations: &mut [usize], boundaries
         boundaries[envelope + 1] = f64::INFINITY;
     }
     envelope = 0;
-    for q in 0..n {
-        while boundaries[envelope + 1] < usize_as_f64(q) {
+    for (q, output_value) in output.iter_mut().enumerate().take(n) {
+        let q_float = usize_as_f64(q);
+        while matches!(
+            boundaries[envelope + 1].partial_cmp(&q_float),
+            Some(std::cmp::Ordering::Less)
+        ) {
             envelope += 1;
         }
         let location = locations[envelope];
         let delta = usize_as_f64(q.abs_diff(location));
-        output[q] = delta.mul_add(delta, input[location]);
+        *output_value = delta.mul_add(delta, input[location]);
     }
 }
 
 fn parabola_intersection(input: &[f64], left: usize, right: usize) -> f64 {
     let left_f = usize_as_f64(left);
     let right_f = usize_as_f64(right);
-    let numerator = (input[left] + left_f * left_f) - (input[right] + right_f * right_f);
+    let numerator = left_f.mul_add(left_f, input[left])
+        - right_f.mul_add(right_f, input[right]);
     numerator / (2.0 * (left_f - right_f))
 }
 
@@ -790,7 +810,7 @@ fn gaussian_blur(
     let mut weights = (0..=kernel_radius)
         .map(|offset| (-0.5 * (usize_as_f64(offset) / sigma).powi(2)).exp())
         .collect::<Vec<_>>();
-    let normalization = weights[0] + 2.0 * weights.iter().skip(1).sum::<f64>();
+    let normalization = 2.0_f64.mul_add(weights.iter().skip(1).sum::<f64>(), weights[0]);
     for weight in &mut weights {
         *weight /= normalization;
     }
@@ -800,8 +820,7 @@ fn gaussian_blur(
     for y in 0..height {
         for x in 0..width {
             let mut value = weights[0] * f64::from(padded.samples[y * width + x]);
-            for offset in 1..=kernel_radius {
-                let weight = weights[offset];
+            for (offset, &weight) in weights.iter().enumerate().skip(1) {
                 if let Some(left) = x.checked_sub(offset) {
                     value += weight * f64::from(padded.samples[y * width + left]);
                 }
@@ -817,8 +836,7 @@ fn gaussian_blur(
     for y in 0..height {
         for x in 0..width {
             let mut value = weights[0] * horizontal[y * width + x];
-            for offset in 1..=kernel_radius {
-                let weight = weights[offset];
+            for (offset, &weight) in weights.iter().enumerate().skip(1) {
                 if let Some(top) = y.checked_sub(offset) {
                     value += weight * horizontal[top * width + x];
                 }
@@ -834,7 +852,7 @@ fn gaussian_blur(
 }
 
 fn crop_to_final_canvas(
-    mask: RasterMask,
+    mask: &RasterMask,
     canvas_extent: RasterCanvasExtent,
     target_extent: OffscreenExtent,
     limits: MaskLimits,
@@ -881,7 +899,7 @@ fn crop_to_final_canvas(
             alpha[y * width_usize + x] = mask.sample(surface_x, surface_y);
         }
     }
-    trim_alpha_mask(origin_x, origin_y, width, height, alpha)
+    trim_alpha_mask(origin_x, origin_y, width, height, &alpha)
 }
 
 fn trim_alpha_mask(
@@ -889,7 +907,7 @@ fn trim_alpha_mask(
     origin_y: u32,
     width: u32,
     height: u32,
-    alpha: Vec<u8>,
+    alpha: &[u8],
 ) -> Result<Option<AlphaMask>, MaskError> {
     let width_usize = usize_from_u32(width);
     let height_usize = usize_from_u32(height);
@@ -945,7 +963,7 @@ fn trim_alpha_mask(
     clippy::cast_sign_loss,
     reason = "callers prove the finite value is non-negative and bounded by the destination integer range"
 )]
-fn bounded_f64_to_usize(value: f64) -> usize {
+const fn bounded_f64_to_usize(value: f64) -> usize {
     value as usize
 }
 
@@ -954,7 +972,7 @@ fn bounded_f64_to_usize(value: f64) -> usize {
     clippy::cast_sign_loss,
     reason = "callers prove the finite value lies within the complete u32 range"
 )]
-fn f64_to_u32(value: f64) -> u32 {
+const fn f64_to_u32(value: f64) -> u32 {
     value as u32
 }
 
@@ -962,7 +980,7 @@ fn f64_to_u32(value: f64) -> u32 {
     clippy::cast_possible_truncation,
     reason = "renderer coordinates originate from finite f32 publication geometry and remain bounded before semantic point reconstruction"
 )]
-fn f64_to_f32(value: f64) -> f32 {
+const fn f64_to_f32(value: f64) -> f32 {
     value as f32
 }
 
