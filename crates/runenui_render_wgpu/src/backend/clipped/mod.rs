@@ -8,6 +8,7 @@ mod image;
 )]
 mod resource;
 mod shaped;
+mod shaped_outline;
 
 pub use resource::{PublicationRenderError, UnsupportedShapedGlyphKind};
 
