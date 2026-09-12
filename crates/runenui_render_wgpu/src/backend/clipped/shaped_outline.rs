@@ -1,11 +1,16 @@
 //! Renderer-private exact outline normalization for already-shaped text.
 //!
 //! The retained `ShapedTextResource` remains the sole logical text authority. This
-//! module lowers its immutable font/face/variation/synthesis/glyph facts into
-//! scale-independent `ScenePath` geometry. Raster scale, MSDF/atlas state, sampled
-//! alpha, paint alpha, target state, and device state are deliberately absent.
+//! module performs one deterministic Skrifa traversal into scale-independent f64
+//! outline verbs. MSDF realization may consume those verbs without narrowing the
+//! existing geometry path; ADR 0015 neutral support projects the same verbs into
+//! positioned RunenUI `ScenePath` geometry. Raster scale, atlas state, sampled alpha,
+//! paint alpha, target state, and device state are deliberately absent.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use runenui_core::{LogicalPoint, PathFillRule, PathVerb, ScenePath};
 use runenui_text::{ShapedTextResource, TextGlyph};
@@ -38,10 +43,53 @@ pub(super) enum OutlineResolveFailure {
     },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct OutlinePoint {
+    x: f64,
+    y: f64,
+}
+
+impl OutlinePoint {
+    pub(super) const fn x(self) -> f64 {
+        self.x
+    }
+
+    pub(super) const fn y(self) -> f64 {
+        self.y
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum OutlineVerb {
+    MoveTo(OutlinePoint),
+    LineTo(OutlinePoint),
+    QuadraticTo {
+        control: OutlinePoint,
+        to: OutlinePoint,
+    },
+    CubicTo {
+        control1: OutlinePoint,
+        control2: OutlinePoint,
+        to: OutlinePoint,
+    },
+    Close,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct GlyphOutline {
+    verbs: Arc<[OutlineVerb]>,
+}
+
+impl GlyphOutline {
+    pub(super) fn verbs(&self) -> &[OutlineVerb] {
+        &self.verbs
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct UniqueGlyphOutline {
     glyph_id: u32,
-    path: Option<ScenePath>,
+    outline: Option<GlyphOutline>,
 }
 
 impl UniqueGlyphOutline {
@@ -49,13 +97,13 @@ impl UniqueGlyphOutline {
         self.glyph_id
     }
 
-    pub(super) const fn path(&self) -> Option<&ScenePath> {
-        self.path.as_ref()
+    pub(super) const fn outline(&self) -> Option<&GlyphOutline> {
+        self.outline.as_ref()
     }
 }
 
 /// Resolves each distinct glyph id exactly once into normalized renderer-private
-/// outline geometry. Missing scalable/intrinsic representation remains valid
+/// f64 outline geometry. Missing scalable/intrinsic representation remains valid
 /// non-painting content, matching the established shaped-text renderer contract.
 pub(super) fn resolve_unique_outlines(
     resource: &ShapedTextResource,
@@ -117,7 +165,7 @@ pub(super) fn resolve_unique_outlines(
             });
         }
 
-        let path = if let Some(outline) = outlines.get(glyph_id) {
+        let outline = if let Some(outline) = outlines.get(glyph_id) {
             let mut pen = OutlinePathPen::new(resource.font().faux_skew());
             outline
                 .draw(DrawSettings::unhinted(Size::new(1.0), location), &mut pen)
@@ -133,7 +181,7 @@ pub(super) fn resolve_unique_outlines(
         };
         resolved.push(UniqueGlyphOutline {
             glyph_id: glyph.id(),
-            path,
+            outline,
         });
     }
 
@@ -141,8 +189,9 @@ pub(super) fn resolve_unique_outlines(
 }
 
 /// Resolves painting glyph occurrences into positioned resource-local logical
-/// paths. Distinct glyph ids share one normalized extraction, while every shaped
-/// occurrence retains its exact logical position.
+/// `ScenePath` values. Distinct glyph ids share one f64 extraction, while every
+/// shaped occurrence retains its exact logical position before the final checked
+/// narrowing into RunenUI's logical f32 coordinate vocabulary.
 pub(super) fn resolve_positioned_paths(
     resource: &ShapedTextResource,
     run_origin: LogicalPoint,
@@ -150,18 +199,16 @@ pub(super) fn resolve_positioned_paths(
     let outlines = resolve_unique_outlines(resource)?;
     let by_id = outlines
         .iter()
-        .map(|outline| (outline.glyph_id(), outline.path()))
+        .map(|outline| (outline.glyph_id(), outline.outline()))
         .collect::<HashMap<_, _>>();
     let mut paths = Vec::new();
     for glyph in resource.glyphs() {
-        let Some(Some(path)) = by_id.get(&glyph.id()).copied() else {
+        let Some(Some(outline)) = by_id.get(&glyph.id()).copied() else {
             continue;
         };
-        let positioned =
-            position_path(path, *glyph, run_origin, resource.font_size()).map_err(|_| {
-                OutlineResolveFailure::InvalidOutline {
-                    glyph_id: glyph.id(),
-                }
+        let positioned = positioned_scene_path(outline, *glyph, run_origin, resource.font_size())
+            .map_err(|_| OutlineResolveFailure::InvalidOutline {
+                glyph_id: glyph.id(),
             })?;
         if !positioned.is_coverage_empty() {
             paths.push(positioned);
@@ -171,9 +218,10 @@ pub(super) fn resolve_positioned_paths(
 }
 
 struct OutlinePathPen {
-    verbs: Vec<PathVerb>,
+    verbs: Vec<OutlineVerb>,
     contour_open: bool,
     has_segment: bool,
+    has_any_segment: bool,
     invalid: bool,
     skew: f64,
 }
@@ -185,48 +233,43 @@ impl OutlinePathPen {
             verbs: Vec::new(),
             contour_open: false,
             has_segment: false,
+            has_any_segment: false,
             invalid: !skew.is_finite(),
             skew,
         }
     }
 
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "font outline coordinates narrow to RunenUI logical f32 only after explicit finite/range validation"
-    )]
-    fn point(&mut self, x: f32, y: f32) -> Option<LogicalPoint> {
+    fn point(&mut self, x: f32, y: f32) -> Option<OutlinePoint> {
         let y = -f64::from(y);
         let x = self.skew.mul_add(y, f64::from(x));
-        if !x.is_finite()
-            || !y.is_finite()
-            || x < f64::from(f32::MIN)
-            || x > f64::from(f32::MAX)
-            || y < f64::from(f32::MIN)
-            || y > f64::from(f32::MAX)
-        {
+        if !x.is_finite() || !y.is_finite() {
             self.invalid = true;
             return None;
         }
-        LogicalPoint::new(x as f32, y as f32)
-            .inspect_err(|_| self.invalid = true)
-            .ok()
+        Some(OutlinePoint { x, y })
     }
 
     fn finish_contour(&mut self) {
         if self.contour_open && self.has_segment {
-            self.verbs.push(PathVerb::Close);
+            self.verbs.push(OutlineVerb::Close);
         }
         self.contour_open = false;
         self.has_segment = false;
     }
 
-    fn finish(mut self) -> Result<Option<ScenePath>, ()> {
+    fn finish(mut self) -> Result<Option<GlyphOutline>, ()> {
         self.finish_contour();
         if self.invalid {
             return Err(());
         }
-        let path = ScenePath::new(self.verbs, PathFillRule::NonZero).map_err(|_| ())?;
-        Ok((!path.is_coverage_empty()).then_some(path))
+        Ok(self.has_any_segment.then(|| GlyphOutline {
+            verbs: self.verbs.into(),
+        }))
+    }
+
+    fn mark_segment(&mut self) {
+        self.has_segment = true;
+        self.has_any_segment = true;
     }
 }
 
@@ -234,7 +277,7 @@ impl OutlinePen for OutlinePathPen {
     fn move_to(&mut self, x: f32, y: f32) {
         self.finish_contour();
         if let Some(point) = self.point(x, y) {
-            self.verbs.push(PathVerb::MoveTo(point));
+            self.verbs.push(OutlineVerb::MoveTo(point));
             self.contour_open = true;
         }
     }
@@ -247,8 +290,8 @@ impl OutlinePen for OutlinePathPen {
             self.invalid = true;
             return;
         }
-        self.verbs.push(PathVerb::LineTo(to));
-        self.has_segment = true;
+        self.verbs.push(OutlineVerb::LineTo(to));
+        self.mark_segment();
     }
 
     fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
@@ -262,8 +305,8 @@ impl OutlinePen for OutlinePathPen {
             self.invalid = true;
             return;
         }
-        self.verbs.push(PathVerb::QuadraticTo { control, to });
-        self.has_segment = true;
+        self.verbs.push(OutlineVerb::QuadraticTo { control, to });
+        self.mark_segment();
     }
 
     fn curve_to(&mut self, c0x: f32, c0y: f32, c1x: f32, c1y: f32, x: f32, y: f32) {
@@ -280,12 +323,12 @@ impl OutlinePen for OutlinePathPen {
             self.invalid = true;
             return;
         }
-        self.verbs.push(PathVerb::CubicTo {
+        self.verbs.push(OutlineVerb::CubicTo {
             control1,
             control2,
             to,
         });
-        self.has_segment = true;
+        self.mark_segment();
     }
 
     fn close(&mut self) {
@@ -293,28 +336,28 @@ impl OutlinePen for OutlinePathPen {
     }
 }
 
-fn position_path(
-    path: &ScenePath,
+fn positioned_scene_path(
+    outline: &GlyphOutline,
     glyph: TextGlyph,
     run_origin: LogicalPoint,
     font_size: f32,
 ) -> Result<ScenePath, ()> {
-    let verbs = path
+    let verbs = outline
         .verbs()
         .iter()
         .copied()
         .map(|verb| match verb {
-            PathVerb::MoveTo(point) => {
+            OutlineVerb::MoveTo(point) => {
                 position_point(point, glyph, run_origin, font_size).map(PathVerb::MoveTo)
             }
-            PathVerb::LineTo(point) => {
+            OutlineVerb::LineTo(point) => {
                 position_point(point, glyph, run_origin, font_size).map(PathVerb::LineTo)
             }
-            PathVerb::QuadraticTo { control, to } => Ok(PathVerb::QuadraticTo {
+            OutlineVerb::QuadraticTo { control, to } => Ok(PathVerb::QuadraticTo {
                 control: position_point(control, glyph, run_origin, font_size)?,
                 to: position_point(to, glyph, run_origin, font_size)?,
             }),
-            PathVerb::CubicTo {
+            OutlineVerb::CubicTo {
                 control1,
                 control2,
                 to,
@@ -323,27 +366,27 @@ fn position_path(
                 control2: position_point(control2, glyph, run_origin, font_size)?,
                 to: position_point(to, glyph, run_origin, font_size)?,
             }),
-            PathVerb::Close => Ok(PathVerb::Close),
+            OutlineVerb::Close => Ok(PathVerb::Close),
         })
         .collect::<Result<Vec<_>, ()>>()?;
-    ScenePath::new(verbs, path.fill_rule()).map_err(|_| ())
+    ScenePath::new(verbs, PathFillRule::NonZero).map_err(|_| ())
 }
 
 #[allow(
     clippy::cast_possible_truncation,
-    reason = "positioned glyph geometry narrows to logical f32 only after finite/range validation"
+    reason = "positioned f64 glyph support narrows to logical f32 only after explicit finite/range validation"
 )]
 fn position_point(
-    point: LogicalPoint,
+    point: OutlinePoint,
     glyph: TextGlyph,
     run_origin: LogicalPoint,
     font_size: f32,
 ) -> Result<LogicalPoint, ()> {
-    let x = f64::from(point.x()).mul_add(
+    let x = point.x().mul_add(
         f64::from(font_size),
         f64::from(glyph.x()) + f64::from(run_origin.x()),
     );
-    let y = f64::from(point.y()).mul_add(
+    let y = point.y().mul_add(
         f64::from(font_size),
         f64::from(glyph.y()) + f64::from(run_origin.y()),
     );
@@ -364,7 +407,7 @@ mod tests {
     use runenui_core::{FontFamilyName, GenericFontFamily, LogicalPoint, Typography};
     use runenui_text::{FontSourcePolicy, TextConstraints, TextRequest, TextSystem};
 
-    use super::{resolve_positioned_paths, resolve_unique_outlines};
+    use super::{OutlineVerb, resolve_positioned_paths, resolve_unique_outlines};
 
     const FONT_BYTES: &[u8] = include_bytes!("../../../tests/fixtures/Cantarell-Regular.ttf");
 
@@ -393,7 +436,13 @@ mod tests {
             .unwrap_or_else(|_| unreachable!("Cantarell outlines resolve"));
         assert_eq!(resource.glyphs().len(), 4);
         assert_eq!(outlines.len(), 1);
-        assert!(outlines[0].path().is_some());
+        let outline = outlines[0]
+            .outline()
+            .unwrap_or_else(|| unreachable!("A has an outline"));
+        assert!(outline.verbs().iter().any(|verb| matches!(
+            verb,
+            OutlineVerb::LineTo(_) | OutlineVerb::QuadraticTo { .. } | OutlineVerb::CubicTo { .. }
+        )));
     }
 
     #[test]
