@@ -786,10 +786,10 @@ fn square_dilate(
                 .saturating_add(kernel_radius)
                 .saturating_add(1)
                 .min(height);
-            samples[y * width + x] = if prefix[end] != prefix[start] {
-                u8::MAX
-            } else {
+            samples[y * width + x] = if prefix[end] == prefix[start] {
                 0
+            } else {
+                u8::MAX
             };
         }
     }
