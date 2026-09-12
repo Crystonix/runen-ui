@@ -77,9 +77,7 @@ pub(super) enum NeutralSupport {
 impl NeutralSupport {
     /// Reconstructs one published item's exact neutral support without observing
     /// any realized source alpha or item opacity.
-    pub(super) fn from_item(
-        item: &PaintSceneItem,
-    ) -> Result<Arc<Self>, UnsupportedSceneSemantic> {
+    pub(super) fn from_item(item: &PaintSceneItem) -> Result<Arc<Self>, UnsupportedSceneSemantic> {
         let local_to_surface = item.local_to_surface();
         let primitive = match item.primitive() {
             PaintPrimitive::Fill { shape, .. } => NeutralPrimitiveSupport::Fill {
@@ -203,20 +201,17 @@ mod tests {
     }
 
     fn source() -> Arc<NeutralSupport> {
-        Arc::new(NeutralSupport::Primitive(
-            NeutralPrimitiveSupport::Image {
-                destinations: Arc::<[LogicalRect]>::from(vec![rect()]),
-                local_to_surface: LogicalTransform::IDENTITY,
-            },
-        ))
+        Arc::new(NeutralSupport::Primitive(NeutralPrimitiveSupport::Image {
+            destinations: Arc::<[LogicalRect]>::from(vec![rect()]),
+            local_to_surface: LogicalTransform::IDENTITY,
+        }))
     }
 
     fn shadow(color: Color) -> DropShadow {
         DropShadow::new(
             2.0,
             -3.0,
-            LogicalLength::new(4.0)
-                .unwrap_or_else(|_| unreachable!("controlled sigma is valid")),
+            LogicalLength::new(4.0).unwrap_or_else(|_| unreachable!("controlled sigma is valid")),
             -1.5,
             color,
         )
@@ -225,14 +220,9 @@ mod tests {
 
     #[test]
     fn shadow_color_alpha_cannot_change_neutral_support() {
-        let transparent = NeutralSupport::shadow(
-            source(),
-            shadow(Color::rgba(0x10, 0x20, 0x30, 0x00)),
-        );
-        let opaque = NeutralSupport::shadow(
-            source(),
-            shadow(Color::rgba(0xF0, 0xE0, 0xD0, 0xFF)),
-        );
+        let transparent =
+            NeutralSupport::shadow(source(), shadow(Color::rgba(0x10, 0x20, 0x30, 0x00)));
+        let opaque = NeutralSupport::shadow(source(), shadow(Color::rgba(0xF0, 0xE0, 0xD0, 0xFF)));
         assert_eq!(transparent, opaque);
     }
 
@@ -267,10 +257,7 @@ mod tests {
 
     #[test]
     fn neutral_shadow_support_freezes_spread_offset_and_three_sigma_envelope() {
-        let support = NeutralSupport::shadow(
-            source(),
-            shadow(Color::rgba(0x00, 0x00, 0x00, 0x80)),
-        );
+        let support = NeutralSupport::shadow(source(), shadow(Color::rgba(0x00, 0x00, 0x00, 0x80)));
         let NeutralSupport::Shadow {
             spread,
             offset_x,

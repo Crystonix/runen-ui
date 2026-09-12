@@ -118,9 +118,7 @@ pub(super) fn prepare(scene: &PaintScene) -> Result<PreparedComposition, Publica
         &mut needs_stencil,
     )?;
     let _scene_neutral_support = support::NeutralSupport::union(
-        root_entries
-            .iter()
-            .map(PreparedSceneEntry::neutral_support),
+        root_entries.iter().map(PreparedSceneEntry::neutral_support),
     );
     if has_shadows {
         return Err(PublicationRenderError::UnsupportedGroupShadows);
@@ -144,17 +142,17 @@ fn prepare_entries(
         .copied()
         .map(|entry| {
             if let Some(item_index) = entry.item_index() {
-                let item = scene.items().get(item_index).unwrap_or_else(|| {
-                    unreachable!("runtime composition item index resolves")
-                });
-                let neutral_support = support::NeutralSupport::from_item(item).map_err(
-                    |semantic| {
+                let item = scene
+                    .items()
+                    .get(item_index)
+                    .unwrap_or_else(|| unreachable!("runtime composition item index resolves"));
+                let neutral_support =
+                    support::NeutralSupport::from_item(item).map_err(|semantic| {
                         super::scene_failure(SceneValidationError::UnsupportedItem {
                             item_index,
                             semantic,
                         })
-                    },
-                )?;
+                    })?;
                 return Ok(PreparedSceneEntry::Item {
                     item_index,
                     neutral_support,
