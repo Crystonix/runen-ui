@@ -162,17 +162,19 @@ impl NeutralSupport {
         ))
     }
 
-    /// Resolves only shaped-text nodes reachable from a support set that is actually
-    /// consumed by an ordinary shadow. The immutable retained shaped resource is read
-    /// directly from this exact publication; atlas/MSDF state never participates.
-    /// Shared symbolic nodes are memoized so sibling/ancestor support reuse does not
-    /// manufacture duplicate geometry interpretations.
+    /// Replaces one support root by resolving only shaped-text nodes reachable from
+    /// a support set that is actually consumed by an ordinary shadow. The immutable
+    /// retained shaped resource is read directly from this exact publication;
+    /// atlas/MSDF state never participates. Shared symbolic nodes are memoized so
+    /// sibling/ancestor reuse does not manufacture duplicate geometry interpretations.
     pub(super) fn resolve_shaped_text(
         scene: &PaintScene,
-        source: &Arc<Self>,
+        source: Arc<Self>,
     ) -> Result<Arc<Self>, PublicationRenderError> {
         let mut memo = HashMap::<*const Self, Arc<Self>>::new();
-        Self::resolve_shaped_text_inner(scene, source, &mut memo)
+        let resolved = Self::resolve_shaped_text_inner(scene, &source, &mut memo)?;
+        drop(source);
+        Ok(resolved)
     }
 
     fn resolve_shaped_text_inner(
