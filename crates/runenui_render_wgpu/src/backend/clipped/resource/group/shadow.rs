@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use runenui_core::Color;
 use wgpu::util::DeviceExt;
 
-use super::mask::AlphaMask;
 use super::super::super::super::{OffscreenRenderError, srgb8_to_linear_f32};
+use super::mask::AlphaMask;
 
 const SHADOW_UNIFORM_SIZE: usize = 32;
 
