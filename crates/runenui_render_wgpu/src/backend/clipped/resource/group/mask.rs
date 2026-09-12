@@ -456,10 +456,7 @@ fn triangle_area2(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
 }
 
 fn edge_sign(point: [f64; 2], from: [f64; 2], to: [f64; 2]) -> f64 {
-    (from[0] - to[0]).mul_add(
-        -(point[1] - to[1]),
-        (point[0] - to[0]) * (from[1] - to[1]),
-    )
+    (from[0] - to[0]).mul_add(-(point[1] - to[1]), (point[0] - to[0]) * (from[1] - to[1]))
 }
 
 fn merge_masks(
@@ -741,8 +738,7 @@ fn edt_1d(input: &[f64], output: &mut [f64], locations: &mut [usize], boundaries
 fn parabola_intersection(input: &[f64], left: usize, right: usize) -> f64 {
     let left_f = usize_as_f64(left);
     let right_f = usize_as_f64(right);
-    let numerator = left_f.mul_add(left_f, input[left])
-        - right_f.mul_add(right_f, input[right]);
+    let numerator = left_f.mul_add(left_f, input[left]) - right_f.mul_add(right_f, input[right]);
     numerator / (2.0 * (left_f - right_f))
 }
 
