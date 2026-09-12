@@ -4,49 +4,50 @@
 //! projects it onto renderer-private physical-pixel masks solely to realize ordinary
 //! shadows. Source color, image payload alpha, text/MSDF alpha, item/group opacity,
 //! target contents, and device cache state never participate in support generation.
+//! Off-surface source support is retained through spread/offset/blur and is cropped
+//! only after the complete shadow has been realized.
 
 use std::{fmt, sync::Arc};
 
-use runenui_core::{LogicalRect, LogicalTransform, SceneShape};
+use runenui_core::{LogicalTransform, SceneShape};
 use runenui_runtime::{RasterScale, SceneClip};
 
 use crate::tessellation::{TessellatedGeometry, tessellate_fill, tessellate_stroke};
 
-use super::support::{NeutralPrimitiveSupport, NeutralShadowFacts, NeutralSupport};
+use super::support::{NeutralPrimitiveSupport, NeutralSupport};
+use super::super::super::super::{OffscreenExtent, RasterCanvasExtent};
 
 const DISTANCE_INFINITY: f64 = 1.0e30;
-const EROSION_SAMPLE_SAFETY: f64 = std::f64::consts::FRAC_1_SQRT_2;
+const PEAK_WORKSPACE_BYTES_PER_PIXEL: u64 = 24;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct MaskLimits {
-    max_dimension: u32,
-    max_bytes: u64,
+    max_workspace_bytes: u64,
 }
 
 impl MaskLimits {
-    pub(super) const fn new(max_dimension: u32, max_bytes: u64) -> Self {
+    pub(super) const fn new(max_workspace_bytes: u64) -> Self {
         Self {
-            max_dimension,
-            max_bytes,
+            max_workspace_bytes,
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct AlphaMask {
-    origin_x: f64,
-    origin_y: f64,
+    origin_x: u32,
+    origin_y: u32,
     width: u32,
     height: u32,
     alpha: Arc<[u8]>,
 }
 
 impl AlphaMask {
-    pub(super) const fn origin_x(&self) -> f64 {
+    pub(super) const fn origin_x(&self) -> u32 {
         self.origin_x
     }
 
-    pub(super) const fn origin_y(&self) -> f64 {
+    pub(super) const fn origin_y(&self) -> u32 {
         self.origin_y
     }
 
@@ -68,16 +69,12 @@ pub(super) enum MaskError {
     Geometry(String),
     UnresolvedShapedText,
     NonFiniteWorkspace,
-    ExtentExceedsDeviceLimit {
-        width: u64,
-        height: u64,
-        max_dimension: u32,
-    },
-    AllocationExceedsDeviceLimit {
+    WorkspaceExtentOverflow,
+    AllocationExceedsLimit {
         required_bytes: u64,
         max_bytes: u64,
     },
-    AllocationOverflow,
+    AllocationFailed,
 }
 
 impl fmt::Display for MaskError {
@@ -90,55 +87,58 @@ impl fmt::Display for MaskError {
             Self::NonFiniteWorkspace => {
                 formatter.write_str("neutral-support raster workspace is non-finite")
             }
-            Self::ExtentExceedsDeviceLimit {
-                width,
-                height,
-                max_dimension,
-            } => write!(
-                formatter,
-                "neutral-support raster workspace {width}x{height} exceeds device 2D texture limit {max_dimension}"
+            Self::WorkspaceExtentOverflow => formatter.write_str(
+                "neutral-support raster workspace exceeds the renderer's addressable pixel range",
             ),
-            Self::AllocationExceedsDeviceLimit {
+            Self::AllocationExceedsLimit {
                 required_bytes,
                 max_bytes,
             } => write!(
                 formatter,
                 "neutral-support raster workspace requires {required_bytes} bytes, exceeding renderer allocation limit {max_bytes}"
             ),
-            Self::AllocationOverflow => {
-                formatter.write_str("neutral-support raster workspace allocation overflows")
-            }
+            Self::AllocationFailed => formatter
+                .write_str("neutral-support raster workspace allocation failed"),
         }
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the disposable visual-shadow boundary keeps exact symbolic source geometry, effect scalars, raster facts, final-canvas clipping, and allocation policy explicit"
+)]
 pub(super) fn prepare_visual_shadow(
     source: &Arc<NeutralSupport>,
-    shadow: NeutralShadowFacts,
+    spread: f64,
+    offset_x: f64,
+    offset_y: f64,
+    blur_square_half_extent: f64,
     raster_scale: RasterScale,
+    canvas_extent: RasterCanvasExtent,
+    target_extent: OffscreenExtent,
     limits: MaskLimits,
 ) -> Result<Option<AlphaMask>, MaskError> {
     let scale = f64::from(raster_scale.get());
     let Some(mut source) = rasterize_support(source, scale, limits)? else {
         return Ok(None);
     };
-    source = signed_euclidean_spread(source, shadow.spread() * scale, limits)?;
+    source = signed_euclidean_spread(source, spread * scale, limits)?;
     if source.is_empty() {
         return Ok(None);
     }
-    source.origin_x += shadow.offset_x() * scale;
-    source.origin_y += shadow.offset_y() * scale;
-    let sigma = shadow.blur_square_half_extent() / 3.0 * scale;
-    let blur_radius = shadow.blur_square_half_extent() * scale;
+    source.origin_x += offset_x * scale;
+    source.origin_y += offset_y * scale;
+    let sigma = blur_square_half_extent / 3.0 * scale;
+    let blur_radius = blur_square_half_extent * scale;
     let blurred = gaussian_blur(source, sigma, blur_radius, limits)?;
-    Ok((!blurred.is_empty()).then(|| blurred.into_alpha()))
+    crop_to_final_canvas(blurred, canvas_extent, target_extent, limits)
 }
 
 fn rasterize_support(
     support: &Arc<NeutralSupport>,
     scale: f64,
     limits: MaskLimits,
-) -> Result<Option<BinaryMask>, MaskError> {
+) -> Result<Option<RasterMask>, MaskError> {
     match support.as_ref() {
         NeutralSupport::Empty => Ok(None),
         NeutralSupport::Primitive(primitive) => rasterize_primitive(primitive, scale, limits),
@@ -189,7 +189,7 @@ fn rasterize_primitive(
     primitive: &NeutralPrimitiveSupport,
     scale: f64,
     limits: MaskLimits,
-) -> Result<Option<BinaryMask>, MaskError> {
+) -> Result<Option<RasterMask>, MaskError> {
     match primitive {
         NeutralPrimitiveSupport::Fill {
             shape,
@@ -252,7 +252,7 @@ fn rasterize_primitive(
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct BinaryMask {
+struct RasterMask {
     origin_x: f64,
     origin_y: f64,
     width: u32,
@@ -260,22 +260,12 @@ struct BinaryMask {
     samples: Vec<u8>,
 }
 
-impl BinaryMask {
+impl RasterMask {
     fn is_empty(&self) -> bool {
         self.samples.iter().all(|sample| *sample == 0)
     }
 
-    fn into_alpha(self) -> AlphaMask {
-        AlphaMask {
-            origin_x: self.origin_x,
-            origin_y: self.origin_y,
-            width: self.width,
-            height: self.height,
-            alpha: self.samples.into(),
-        }
-    }
-
-    fn sample(&self, surface_x: f64, surface_y: f64) -> bool {
+    fn sample(&self, surface_x: f64, surface_y: f64) -> u8 {
         let local_x = (surface_x - self.origin_x).floor();
         let local_y = (surface_y - self.origin_y).floor();
         if !local_x.is_finite()
@@ -285,11 +275,11 @@ impl BinaryMask {
             || local_x >= f64::from(self.width)
             || local_y >= f64::from(self.height)
         {
-            return false;
+            return 0;
         }
-        let x = local_x as usize;
-        let y = local_y as usize;
-        self.samples[y * self.width as usize + x] != 0
+        let x = bounded_f64_to_usize(local_x);
+        let y = bounded_f64_to_usize(local_y);
+        self.samples[y * usize_from_u32(self.width) + x]
     }
 }
 
@@ -298,7 +288,7 @@ fn geometry_mask(
     transform: LogicalTransform,
     scale: f64,
     limits: MaskLimits,
-) -> Result<Option<BinaryMask>, MaskError> {
+) -> Result<Option<RasterMask>, MaskError> {
     if geometry.positions().is_empty() || geometry.indices().is_empty() {
         return Ok(None);
     }
@@ -311,17 +301,17 @@ fn geometry_mask(
     let Some((origin_x, origin_y, width, height)) = point_workspace(&transformed, limits)? else {
         return Ok(None);
     };
-    let mut mask = BinaryMask {
+    let mut mask = RasterMask {
         origin_x,
         origin_y,
         width,
         height,
-        samples: allocate_samples(width, height, limits)?,
+        samples: allocate_u8_samples(width, height, limits)?,
     };
     for triangle in geometry.indices().chunks_exact(3) {
-        let a = transformed[triangle[0] as usize];
-        let b = transformed[triangle[1] as usize];
-        let c = transformed[triangle[2] as usize];
+        let a = transformed[usize_from_u32(triangle[0])];
+        let b = transformed[usize_from_u32(triangle[1])];
+        let c = transformed[usize_from_u32(triangle[2])];
         rasterize_triangle(&mut mask, a, b, c);
     }
     Ok((!mask.is_empty()).then_some(mask))
@@ -378,49 +368,62 @@ fn workspace_from_bounds(
     if end_x <= origin_x || end_y <= origin_y {
         return Ok(None);
     }
-    let width = end_x - origin_x;
-    let height = end_y - origin_y;
-    if width > f64::from(u32::MAX) || height > f64::from(u32::MAX) {
-        return Err(MaskError::ExtentExceedsDeviceLimit {
-            width: u64::MAX,
-            height: u64::MAX,
-            max_dimension: limits.max_dimension,
-        });
-    }
-    let width = width as u32;
-    let height = height as u32;
-    validate_extent(width, height, limits)?;
+    let width = finite_dimension(end_x - origin_x)?;
+    let height = finite_dimension(end_y - origin_y)?;
+    validate_workspace(width, height, limits)?;
     Ok(Some((origin_x, origin_y, width, height)))
 }
 
-fn validate_extent(width: u32, height: u32, limits: MaskLimits) -> Result<(), MaskError> {
-    if width > limits.max_dimension || height > limits.max_dimension {
-        return Err(MaskError::ExtentExceedsDeviceLimit {
-            width: u64::from(width),
-            height: u64::from(height),
-            max_dimension: limits.max_dimension,
-        });
+fn finite_dimension(value: f64) -> Result<u32, MaskError> {
+    if !value.is_finite() || value < 0.0 || value > f64::from(u32::MAX) {
+        return Err(MaskError::WorkspaceExtentOverflow);
     }
-    let required = u64::from(width)
+    Ok(f64_to_u32(value))
+}
+
+fn validate_workspace(width: u32, height: u32, limits: MaskLimits) -> Result<(), MaskError> {
+    let pixels = u64::from(width)
         .checked_mul(u64::from(height))
-        .ok_or(MaskError::AllocationOverflow)?;
-    if required > limits.max_bytes {
-        return Err(MaskError::AllocationExceedsDeviceLimit {
-            required_bytes: required,
-            max_bytes: limits.max_bytes,
+        .ok_or(MaskError::WorkspaceExtentOverflow)?;
+    let required_bytes = pixels
+        .checked_mul(PEAK_WORKSPACE_BYTES_PER_PIXEL)
+        .ok_or(MaskError::WorkspaceExtentOverflow)?;
+    if required_bytes > limits.max_workspace_bytes {
+        return Err(MaskError::AllocationExceedsLimit {
+            required_bytes,
+            max_bytes: limits.max_workspace_bytes,
         });
     }
     Ok(())
 }
 
-fn allocate_samples(width: u32, height: u32, limits: MaskLimits) -> Result<Vec<u8>, MaskError> {
-    validate_extent(width, height, limits)?;
-    let len = usize::try_from(u64::from(width) * u64::from(height))
-        .map_err(|_| MaskError::AllocationOverflow)?;
-    Ok(vec![0; len])
+fn sample_count(width: u32, height: u32, limits: MaskLimits) -> Result<usize, MaskError> {
+    validate_workspace(width, height, limits)?;
+    usize::try_from(u64::from(width) * u64::from(height))
+        .map_err(|_| MaskError::WorkspaceExtentOverflow)
 }
 
-fn rasterize_triangle(mask: &mut BinaryMask, a: [f64; 2], b: [f64; 2], c: [f64; 2]) {
+fn allocate_u8_samples(
+    width: u32,
+    height: u32,
+    limits: MaskLimits,
+) -> Result<Vec<u8>, MaskError> {
+    zeroed_vec(sample_count(width, height, limits)?, 0_u8)
+}
+
+fn zeroed_vec<T: Clone>(len: usize, value: T) -> Result<Vec<T>, MaskError> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(len)
+        .map_err(|_| MaskError::AllocationFailed)?;
+    values.resize(len, value);
+    Ok(values)
+}
+
+fn rasterize_triangle(mask: &mut RasterMask, a: [f64; 2], b: [f64; 2], c: [f64; 2]) {
+    if triangle_area2(a, b, c) == 0.0 {
+        return;
+    }
     let min_x = a[0].min(b[0]).min(c[0]).floor().max(mask.origin_x);
     let min_y = a[1].min(b[1]).min(c[1]).floor().max(mask.origin_y);
     let max_x = a[0]
@@ -433,15 +436,15 @@ fn rasterize_triangle(mask: &mut BinaryMask, a: [f64; 2], b: [f64; 2], c: [f64; 
         .max(c[1])
         .ceil()
         .min(mask.origin_y + f64::from(mask.height));
-    let start_x = (min_x - mask.origin_x).max(0.0) as usize;
-    let start_y = (min_y - mask.origin_y).max(0.0) as usize;
-    let end_x = (max_x - mask.origin_x).max(0.0) as usize;
-    let end_y = (max_y - mask.origin_y).max(0.0) as usize;
-    let width = mask.width as usize;
+    let start_x = bounded_f64_to_usize((min_x - mask.origin_x).max(0.0));
+    let start_y = bounded_f64_to_usize((min_y - mask.origin_y).max(0.0));
+    let end_x = bounded_f64_to_usize((max_x - mask.origin_x).max(0.0));
+    let end_y = bounded_f64_to_usize((max_y - mask.origin_y).max(0.0));
+    let width = usize_from_u32(mask.width);
     for y in start_y..end_y {
-        let py = mask.origin_y + y as f64 + 0.5;
+        let py = mask.origin_y + usize_as_f64(y) + 0.5;
         for x in start_x..end_x {
-            let px = mask.origin_x + x as f64 + 0.5;
+            let px = mask.origin_x + usize_as_f64(x) + 0.5;
             if point_in_triangle([px, py], a, b, c) {
                 mask.samples[y * width + x] = 1;
             }
@@ -458,11 +461,15 @@ fn point_in_triangle(point: [f64; 2], a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> 
     !(has_negative && has_positive)
 }
 
+fn triangle_area2(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
+    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+}
+
 fn edge_sign(point: [f64; 2], from: [f64; 2], to: [f64; 2]) -> f64 {
     (point[0] - to[0]) * (from[1] - to[1]) - (from[0] - to[0]) * (point[1] - to[1])
 }
 
-fn union_masks(masks: &[BinaryMask], limits: MaskLimits) -> Result<Option<BinaryMask>, MaskError> {
+fn union_masks(masks: &[RasterMask], limits: MaskLimits) -> Result<Option<RasterMask>, MaskError> {
     let Some(first) = masks.first() else {
         return Ok(None);
     };
@@ -487,19 +494,22 @@ fn union_masks(masks: &[BinaryMask], limits: MaskLimits) -> Result<Option<Binary
     else {
         return Ok(None);
     };
-    let mut result = BinaryMask {
+    let mut result = RasterMask {
         origin_x,
         origin_y,
         width,
         height,
-        samples: allocate_samples(width, height, limits)?,
+        samples: allocate_u8_samples(width, height, limits)?,
     };
-    let width_usize = width as usize;
-    for y in 0..height as usize {
-        let surface_y = origin_y + y as f64 + 0.5;
+    let width_usize = usize_from_u32(width);
+    for y in 0..usize_from_u32(height) {
+        let surface_y = origin_y + usize_as_f64(y) + 0.5;
         for x in 0..width_usize {
-            let surface_x = origin_x + x as f64 + 0.5;
-            if masks.iter().any(|mask| mask.sample(surface_x, surface_y)) {
+            let surface_x = origin_x + usize_as_f64(x) + 0.5;
+            if masks
+                .iter()
+                .any(|mask| mask.sample(surface_x, surface_y) != 0)
+            {
                 result.samples[y * width_usize + x] = 1;
             }
         }
@@ -507,36 +517,22 @@ fn union_masks(masks: &[BinaryMask], limits: MaskLimits) -> Result<Option<Binary
     Ok((!result.is_empty()).then_some(result))
 }
 
-fn intersect_clip(mask: &mut BinaryMask, clip: &SceneClip, scale: f64) -> Result<(), MaskError> {
-    let geometry = tessellate_fill(clip.shape()).map_err(|error| MaskError::Geometry(error.to_string()))?;
-    if geometry.positions().is_empty() || geometry.indices().is_empty() {
-        mask.samples.fill(0);
-        return Ok(());
-    }
-    let transformed = geometry
-        .positions()
-        .iter()
-        .copied()
-        .map(|point| transform_physical(point, clip.clip_to_surface(), scale))
-        .collect::<Vec<_>>();
-    let width = mask.width as usize;
-    for y in 0..mask.height as usize {
-        let surface_y = mask.origin_y + y as f64 + 0.5;
+fn intersect_clip(mask: &mut RasterMask, clip: &SceneClip, scale: f64) -> Result<(), MaskError> {
+    let width = usize_from_u32(mask.width);
+    for y in 0..usize_from_u32(mask.height) {
+        let surface_y = mask.origin_y + usize_as_f64(y) + 0.5;
         for x in 0..width {
             let index = y * width + x;
             if mask.samples[index] == 0 {
                 continue;
             }
-            let surface_x = mask.origin_x + x as f64 + 0.5;
-            let covered = geometry.indices().chunks_exact(3).any(|triangle| {
-                point_in_triangle(
-                    [surface_x, surface_y],
-                    transformed[triangle[0] as usize],
-                    transformed[triangle[1] as usize],
-                    transformed[triangle[2] as usize],
-                )
-            });
-            if !covered {
+            let surface_x = mask.origin_x + usize_as_f64(x) + 0.5;
+            let logical = runenui_core::LogicalPoint::new(
+                f64_to_f32(surface_x / scale),
+                f64_to_f32(surface_y / scale),
+            )
+            .map_err(|_| MaskError::NonFiniteWorkspace)?;
+            if !clip.contains_surface_point(logical) {
                 mask.samples[index] = 0;
             }
         }
@@ -545,10 +541,10 @@ fn intersect_clip(mask: &mut BinaryMask, clip: &SceneClip, scale: f64) -> Result
 }
 
 fn signed_euclidean_spread(
-    mask: BinaryMask,
+    mask: RasterMask,
     radius: f64,
     limits: MaskLimits,
-) -> Result<BinaryMask, MaskError> {
+) -> Result<RasterMask, MaskError> {
     if radius == 0.0 || mask.is_empty() {
         return Ok(mask);
     }
@@ -560,35 +556,35 @@ fn signed_euclidean_spread(
 }
 
 fn dilate_euclidean(
-    mask: BinaryMask,
+    mask: RasterMask,
     radius: f64,
     limits: MaskLimits,
-) -> Result<BinaryMask, MaskError> {
-    let pad = radius.ceil() as u32;
+) -> Result<RasterMask, MaskError> {
+    let pad = radius_pad(radius, 0)?;
     let padded = pad_mask(&mask, pad, limits)?;
-    let distances = squared_distance_transform(&padded.samples, padded.width, padded.height, true);
+    let distances = squared_distance_transform(&padded.samples, padded.width, padded.height, true, limits)?;
     let threshold = radius * radius;
     let samples = distances
         .into_iter()
         .map(|distance| u8::from(distance <= threshold))
         .collect();
-    Ok(BinaryMask { samples, ..padded })
+    Ok(RasterMask { samples, ..padded })
 }
 
 fn erode_euclidean(
-    mask: BinaryMask,
+    mask: RasterMask,
     radius: f64,
     limits: MaskLimits,
-) -> Result<BinaryMask, MaskError> {
-    let pad = radius.ceil().saturating_add(1.0) as u32;
+) -> Result<RasterMask, MaskError> {
+    let pad = radius_pad(radius, 1)?;
     let padded = pad_mask(&mask, pad, limits)?;
-    let distances = squared_distance_transform(&padded.samples, padded.width, padded.height, false);
-    let threshold = (radius + EROSION_SAMPLE_SAFETY).powi(2);
-    let padded_width = padded.width as usize;
-    let source_width = mask.width as usize;
-    let source_height = mask.height as usize;
-    let pad_usize = pad as usize;
-    let mut samples = vec![0; source_width.saturating_mul(source_height)];
+    let distances = squared_distance_transform(&padded.samples, padded.width, padded.height, false, limits)?;
+    let threshold = radius * radius;
+    let padded_width = usize_from_u32(padded.width);
+    let source_width = usize_from_u32(mask.width);
+    let source_height = usize_from_u32(mask.height);
+    let pad_usize = usize_from_u32(pad);
+    let mut samples = allocate_u8_samples(mask.width, mask.height, limits)?;
     for y in 0..source_height {
         for x in 0..source_width {
             let source_index = y * source_width + x;
@@ -599,75 +595,110 @@ fn erode_euclidean(
             samples[source_index] = u8::from(distances[padded_index] > threshold);
         }
     }
-    Ok(BinaryMask { samples, ..mask })
+    Ok(RasterMask { samples, ..mask })
 }
 
-fn pad_mask(mask: &BinaryMask, pad: u32, limits: MaskLimits) -> Result<BinaryMask, MaskError> {
+fn radius_pad(radius: f64, extra: u32) -> Result<u32, MaskError> {
+    if !radius.is_finite() || radius < 0.0 {
+        return Err(MaskError::NonFiniteWorkspace);
+    }
+    let rounded = radius.ceil();
+    if rounded > f64::from(u32::MAX) {
+        return Err(MaskError::WorkspaceExtentOverflow);
+    }
+    f64_to_u32(rounded)
+        .checked_add(extra)
+        .ok_or(MaskError::WorkspaceExtentOverflow)
+}
+
+fn pad_mask(mask: &RasterMask, pad: u32, limits: MaskLimits) -> Result<RasterMask, MaskError> {
     if pad == 0 {
         return Ok(mask.clone());
     }
+    let double_pad = pad.checked_mul(2).ok_or(MaskError::WorkspaceExtentOverflow)?;
     let width = mask
         .width
-        .checked_add(pad.saturating_mul(2))
-        .ok_or(MaskError::AllocationOverflow)?;
+        .checked_add(double_pad)
+        .ok_or(MaskError::WorkspaceExtentOverflow)?;
     let height = mask
         .height
-        .checked_add(pad.saturating_mul(2))
-        .ok_or(MaskError::AllocationOverflow)?;
-    let mut samples = allocate_samples(width, height, limits)?;
-    let destination_width = width as usize;
-    let source_width = mask.width as usize;
-    let pad = pad as usize;
-    for y in 0..mask.height as usize {
+        .checked_add(double_pad)
+        .ok_or(MaskError::WorkspaceExtentOverflow)?;
+    let mut samples = allocate_u8_samples(width, height, limits)?;
+    let destination_width = usize_from_u32(width);
+    let source_width = usize_from_u32(mask.width);
+    let pad_usize = usize_from_u32(pad);
+    for y in 0..usize_from_u32(mask.height) {
         let source = y * source_width;
-        let destination = (y + pad) * destination_width + pad;
+        let destination = (y + pad_usize) * destination_width + pad_usize;
         samples[destination..destination + source_width]
             .copy_from_slice(&mask.samples[source..source + source_width]);
     }
-    Ok(BinaryMask {
-        origin_x: mask.origin_x - pad as f64,
-        origin_y: mask.origin_y - pad as f64,
+    Ok(RasterMask {
+        origin_x: mask.origin_x - f64::from(pad),
+        origin_y: mask.origin_y - f64::from(pad),
         width,
         height,
         samples,
     })
 }
 
-fn squared_distance_transform(samples: &[u8], width: u32, height: u32, feature: bool) -> Vec<f64> {
-    let width = width as usize;
-    let height = height as usize;
-    let mut intermediate = vec![0.0; width.saturating_mul(height)];
-    let mut column = vec![0.0; height];
-    let mut transformed = vec![0.0; height];
+fn squared_distance_transform(
+    samples: &[u8],
+    width: u32,
+    height: u32,
+    feature: bool,
+    limits: MaskLimits,
+) -> Result<Vec<f64>, MaskError> {
+    let width = usize_from_u32(width);
+    let height = usize_from_u32(height);
+    let len = sample_count(
+        u32::try_from(width).map_err(|_| MaskError::WorkspaceExtentOverflow)?,
+        u32::try_from(height).map_err(|_| MaskError::WorkspaceExtentOverflow)?,
+        limits,
+    )?;
+    let mut intermediate = zeroed_vec(len, 0.0_f64)?;
+    let mut result = zeroed_vec(len, 0.0_f64)?;
+    let mut column = zeroed_vec(height, 0.0_f64)?;
+    let mut transformed = zeroed_vec(height, 0.0_f64)?;
+    let mut locations = zeroed_vec(height.max(width), 0_usize)?;
+    let mut boundaries = zeroed_vec(height.max(width).saturating_add(1), 0.0_f64)?;
     for x in 0..width {
         for y in 0..height {
             let is_feature = (samples[y * width + x] != 0) == feature;
             column[y] = if is_feature { 0.0 } else { DISTANCE_INFINITY };
         }
-        edt_1d(&column, &mut transformed);
+        edt_1d(
+            &column,
+            &mut transformed,
+            &mut locations[..height],
+            &mut boundaries[..height + 1],
+        );
         for y in 0..height {
             intermediate[y * width + x] = transformed[y];
         }
     }
-    let mut result = vec![0.0; width.saturating_mul(height)];
-    let mut row = vec![0.0; width];
-    let mut row_transformed = vec![0.0; width];
+    let mut row = zeroed_vec(width, 0.0_f64)?;
+    let mut row_transformed = zeroed_vec(width, 0.0_f64)?;
     for y in 0..height {
         let start = y * width;
         row.copy_from_slice(&intermediate[start..start + width]);
-        edt_1d(&row, &mut row_transformed);
+        edt_1d(
+            &row,
+            &mut row_transformed,
+            &mut locations[..width],
+            &mut boundaries[..width + 1],
+        );
         result[start..start + width].copy_from_slice(&row_transformed);
     }
-    result
+    Ok(result)
 }
 
-fn edt_1d(input: &[f64], output: &mut [f64]) {
+fn edt_1d(input: &[f64], output: &mut [f64], locations: &mut [usize], boundaries: &mut [f64]) {
     if input.is_empty() {
         return;
     }
     let n = input.len();
-    let mut locations = vec![0_usize; n];
-    let mut boundaries = vec![0.0; n + 1];
     let mut envelope = 0_usize;
     locations[0] = 0;
     boundaries[0] = f64::NEG_INFINITY;
@@ -685,89 +716,100 @@ fn edt_1d(input: &[f64], output: &mut [f64]) {
     }
     envelope = 0;
     for q in 0..n {
-        while boundaries[envelope + 1] < q as f64 {
+        while boundaries[envelope + 1] < usize_as_f64(q) {
             envelope += 1;
         }
         let location = locations[envelope];
-        let delta = q.abs_diff(location) as f64;
+        let delta = usize_as_f64(q.abs_diff(location));
         output[q] = delta.mul_add(delta, input[location]);
     }
 }
 
 fn parabola_intersection(input: &[f64], left: usize, right: usize) -> f64 {
-    let left = left as f64;
-    let right = right as f64;
-    let numerator = (input[left as usize] + left * left) - (input[right as usize] + right * right);
-    numerator / (2.0 * (left - right))
+    let left_f = usize_as_f64(left);
+    let right_f = usize_as_f64(right);
+    let numerator = (input[left] + left_f * left_f) - (input[right] + right_f * right_f);
+    numerator / (2.0 * (left_f - right_f))
 }
 
 fn square_dilate(
-    mask: BinaryMask,
+    mask: RasterMask,
     radius: f64,
     limits: MaskLimits,
-) -> Result<BinaryMask, MaskError> {
-    let radius = radius.floor().max(0.0) as u32;
-    if radius == 0 || mask.is_empty() {
+) -> Result<RasterMask, MaskError> {
+    if radius <= 0.0 || mask.is_empty() {
         return Ok(mask);
     }
-    let padded = pad_mask(&mask, radius, limits)?;
-    let width = padded.width as usize;
-    let height = padded.height as usize;
-    let radius = radius as usize;
-    let mut horizontal = vec![0_u8; padded.samples.len()];
+    let pad = radius_pad(radius, 0)?;
+    let kernel_radius = bounded_f64_to_usize(radius.floor());
+    let padded = pad_mask(&mask, pad, limits)?;
+    if kernel_radius == 0 {
+        return Ok(padded);
+    }
+    let width = usize_from_u32(padded.width);
+    let height = usize_from_u32(padded.height);
+    let mut horizontal = zeroed_vec(padded.samples.len(), 0_u8)?;
     for y in 0..height {
-        let mut prefix = vec![0_u32; width + 1];
+        let mut prefix = zeroed_vec(width.saturating_add(1), 0_u32)?;
         for x in 0..width {
             prefix[x + 1] = prefix[x] + u32::from(padded.samples[y * width + x] != 0);
         }
         for x in 0..width {
-            let start = x.saturating_sub(radius);
-            let end = x.saturating_add(radius).saturating_add(1).min(width);
+            let start = x.saturating_sub(kernel_radius);
+            let end = x
+                .saturating_add(kernel_radius)
+                .saturating_add(1)
+                .min(width);
             horizontal[y * width + x] = u8::from(prefix[end] != prefix[start]);
         }
     }
-    let mut samples = vec![0_u8; padded.samples.len()];
+    let mut samples = zeroed_vec(padded.samples.len(), 0_u8)?;
     for x in 0..width {
-        let mut prefix = vec![0_u32; height + 1];
+        let mut prefix = zeroed_vec(height.saturating_add(1), 0_u32)?;
         for y in 0..height {
             prefix[y + 1] = prefix[y] + u32::from(horizontal[y * width + x] != 0);
         }
         for y in 0..height {
-            let start = y.saturating_sub(radius);
-            let end = y.saturating_add(radius).saturating_add(1).min(height);
+            let start = y.saturating_sub(kernel_radius);
+            let end = y
+                .saturating_add(kernel_radius)
+                .saturating_add(1)
+                .min(height);
             samples[y * width + x] = u8::from(prefix[end] != prefix[start]);
         }
     }
-    Ok(BinaryMask { samples, ..padded })
+    Ok(RasterMask { samples, ..padded })
 }
 
 fn gaussian_blur(
-    mask: BinaryMask,
+    mask: RasterMask,
     sigma: f64,
     blur_radius: f64,
     limits: MaskLimits,
-) -> Result<BinaryMask, MaskError> {
-    let radius = blur_radius.floor().max(0.0) as u32;
-    if radius == 0 || sigma <= 0.0 || mask.is_empty() {
+) -> Result<RasterMask, MaskError> {
+    if blur_radius <= 0.0 || sigma <= 0.0 || mask.is_empty() {
         return Ok(mask);
     }
-    let padded = pad_mask(&mask, radius, limits)?;
-    let radius = radius as usize;
-    let weights = (0..=radius)
-        .map(|offset| (-0.5 * (offset as f64 / sigma).powi(2)).exp())
+    let pad = radius_pad(blur_radius, 0)?;
+    let kernel_radius = bounded_f64_to_usize(blur_radius.floor());
+    let padded = pad_mask(&mask, pad, limits)?;
+    if kernel_radius == 0 {
+        return Ok(padded);
+    }
+    let mut weights = (0..=kernel_radius)
+        .map(|offset| (-0.5 * (usize_as_f64(offset) / sigma).powi(2)).exp())
         .collect::<Vec<_>>();
     let normalization = weights[0] + 2.0 * weights.iter().skip(1).sum::<f64>();
-    let weights = weights
-        .into_iter()
-        .map(|weight| weight / normalization)
-        .collect::<Vec<_>>();
-    let width = padded.width as usize;
-    let height = padded.height as usize;
-    let mut horizontal = vec![0.0_f64; padded.samples.len()];
+    for weight in &mut weights {
+        *weight /= normalization;
+    }
+    let width = usize_from_u32(padded.width);
+    let height = usize_from_u32(padded.height);
+    let mut horizontal = zeroed_vec(padded.samples.len(), 0.0_f64)?;
     for y in 0..height {
         for x in 0..width {
             let mut value = weights[0] * f64::from(padded.samples[y * width + x]);
-            for offset in 1..=radius {
+            for offset in 1..=kernel_radius {
                 let weight = weights[offset];
                 if let Some(left) = x.checked_sub(offset) {
                     value += weight * f64::from(padded.samples[y * width + left]);
@@ -780,11 +822,11 @@ fn gaussian_blur(
             horizontal[y * width + x] = value;
         }
     }
-    let mut samples = vec![0_u8; padded.samples.len()];
+    let mut samples = zeroed_vec(padded.samples.len(), 0_u8)?;
     for y in 0..height {
         for x in 0..width {
             let mut value = weights[0] * horizontal[y * width + x];
-            for offset in 1..=radius {
+            for offset in 1..=kernel_radius {
                 let weight = weights[offset];
                 if let Some(top) = y.checked_sub(offset) {
                     value += weight * horizontal[top * width + x];
@@ -794,10 +836,171 @@ fn gaussian_blur(
                     value += weight * horizontal[bottom * width + x];
                 }
             }
-            samples[y * width + x] = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+            samples[y * width + x] = unit_to_u8(value);
         }
     }
-    Ok(BinaryMask { samples, ..padded })
+    Ok(RasterMask { samples, ..padded })
+}
+
+fn crop_to_final_canvas(
+    mask: RasterMask,
+    canvas_extent: RasterCanvasExtent,
+    target_extent: OffscreenExtent,
+    limits: MaskLimits,
+) -> Result<Option<AlphaMask>, MaskError> {
+    if mask.is_empty() || canvas_extent.width() <= 0.0 || canvas_extent.height() <= 0.0 {
+        return Ok(None);
+    }
+    let end_x = (mask.origin_x + f64::from(mask.width))
+        .min(canvas_extent.width())
+        .min(f64::from(target_extent.width()));
+    let end_y = (mask.origin_y + f64::from(mask.height))
+        .min(canvas_extent.height())
+        .min(f64::from(target_extent.height()));
+    let start_x = mask.origin_x.max(0.0).floor();
+    let start_y = mask.origin_y.max(0.0).floor();
+    if end_x <= start_x || end_y <= start_y {
+        return Ok(None);
+    }
+    let origin_x = clamped_f64_to_u32(start_x, target_extent.width());
+    let origin_y = clamped_f64_to_u32(start_y, target_extent.height());
+    let end_x = clamped_f64_to_u32(end_x.ceil(), target_extent.width());
+    let end_y = clamped_f64_to_u32(end_y.ceil(), target_extent.height());
+    if end_x <= origin_x || end_y <= origin_y {
+        return Ok(None);
+    }
+    let width = end_x - origin_x;
+    let height = end_y - origin_y;
+    let mut alpha = allocate_u8_samples(width, height, limits)?;
+    let width_usize = usize_from_u32(width);
+    for y in 0..usize_from_u32(height) {
+        let target_y = origin_y + u32::try_from(y).map_err(|_| MaskError::WorkspaceExtentOverflow)?;
+        let surface_y = f64::from(target_y) + 0.5;
+        if surface_y >= canvas_extent.height() {
+            continue;
+        }
+        for x in 0..width_usize {
+            let target_x = origin_x + u32::try_from(x).map_err(|_| MaskError::WorkspaceExtentOverflow)?;
+            let surface_x = f64::from(target_x) + 0.5;
+            if surface_x >= canvas_extent.width() {
+                continue;
+            }
+            alpha[y * width_usize + x] = mask.sample(surface_x, surface_y);
+        }
+    }
+    trim_alpha_mask(origin_x, origin_y, width, height, alpha)
+}
+
+fn trim_alpha_mask(
+    origin_x: u32,
+    origin_y: u32,
+    width: u32,
+    height: u32,
+    alpha: Vec<u8>,
+) -> Result<Option<AlphaMask>, MaskError> {
+    let width_usize = usize_from_u32(width);
+    let height_usize = usize_from_u32(height);
+    let mut min_x = width_usize;
+    let mut min_y = height_usize;
+    let mut max_x = 0_usize;
+    let mut max_y = 0_usize;
+    let mut found = false;
+    for y in 0..height_usize {
+        for x in 0..width_usize {
+            if alpha[y * width_usize + x] == 0 {
+                continue;
+            }
+            found = true;
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x + 1);
+            max_y = max_y.max(y + 1);
+        }
+    }
+    if !found {
+        return Ok(None);
+    }
+    let trimmed_width = max_x - min_x;
+    let trimmed_height = max_y - min_y;
+    let mut trimmed = zeroed_vec(
+        trimmed_width
+            .checked_mul(trimmed_height)
+            .ok_or(MaskError::WorkspaceExtentOverflow)?,
+        0_u8,
+    )?;
+    for y in 0..trimmed_height {
+        let source = (min_y + y) * width_usize + min_x;
+        let destination = y * trimmed_width;
+        trimmed[destination..destination + trimmed_width]
+            .copy_from_slice(&alpha[source..source + trimmed_width]);
+    }
+    Ok(Some(AlphaMask {
+        origin_x: origin_x
+            .checked_add(u32::try_from(min_x).map_err(|_| MaskError::WorkspaceExtentOverflow)?)
+            .ok_or(MaskError::WorkspaceExtentOverflow)?,
+        origin_y: origin_y
+            .checked_add(u32::try_from(min_y).map_err(|_| MaskError::WorkspaceExtentOverflow)?)
+            .ok_or(MaskError::WorkspaceExtentOverflow)?,
+        width: u32::try_from(trimmed_width).map_err(|_| MaskError::WorkspaceExtentOverflow)?,
+        height: u32::try_from(trimmed_height).map_err(|_| MaskError::WorkspaceExtentOverflow)?,
+        alpha: trimmed.into(),
+    }))
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "callers prove the finite value is non-negative and bounded by the destination integer range"
+)]
+fn bounded_f64_to_usize(value: f64) -> usize {
+    value as usize
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "callers prove the finite value lies within the complete u32 range"
+)]
+fn f64_to_u32(value: f64) -> u32 {
+    value as u32
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "renderer coordinates originate from finite f32 publication geometry and remain bounded before semantic point reconstruction"
+)]
+fn f64_to_f32(value: f64) -> f32 {
+    value as f32
+}
+
+fn clamped_f64_to_u32(value: f64, upper: u32) -> u32 {
+    if value <= 0.0 {
+        0
+    } else if value >= f64::from(upper) {
+        upper
+    } else {
+        f64_to_u32(value)
+    }
+}
+
+fn usize_from_u32(value: u32) -> usize {
+    usize::try_from(value).unwrap_or_else(|_| unreachable!("supported renderer targets address u32 dimensions"))
+}
+
+fn usize_as_f64(value: usize) -> f64 {
+    f64::from(
+        u32::try_from(value)
+            .unwrap_or_else(|_| unreachable!("renderer raster dimensions are bounded by u32")),
+    )
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the clamped unit interval scaled by 255 is exactly representable by u8"
+)]
+fn unit_to_u8(value: f64) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 #[cfg(test)]
@@ -808,8 +1011,9 @@ mod tests {
     use runenui_runtime::RasterScale;
 
     use super::{MaskLimits, prepare_visual_shadow};
+    use crate::backend::{OffscreenExtent, RasterCanvasExtent};
     use crate::backend::clipped::resource::group::support::{
-        NeutralPrimitiveSupport, NeutralShadowFacts, NeutralSupport,
+        NeutralPrimitiveSupport, NeutralSupport,
     };
 
     fn rect_support() -> Arc<NeutralSupport> {
@@ -823,25 +1027,43 @@ mod tests {
     }
 
     fn limits() -> MaskLimits {
-        MaskLimits::new(256, 256 * 256)
+        MaskLimits::new(256 * 256 * 24)
+    }
+
+    fn canvas() -> RasterCanvasExtent {
+        RasterCanvasExtent::new(64.0, 48.0)
+    }
+
+    fn target() -> OffscreenExtent {
+        OffscreenExtent::new(64, 48)
+            .unwrap_or_else(|_| unreachable!("controlled target is non-zero"))
     }
 
     #[test]
-    fn positive_and_negative_spread_use_euclidean_distance() {
-        let scale = RasterScale::ONE;
+    fn positive_and_negative_spread_use_sampled_euclidean_distance() {
         let expanded = prepare_visual_shadow(
             &rect_support(),
-            NeutralShadowFacts::new(0.0, 0.0, 0.0, 2.0),
-            scale,
+            2.0,
+            0.0,
+            0.0,
+            0.0,
+            RasterScale::ONE,
+            canvas(),
+            target(),
             limits(),
         )
         .unwrap_or_else(|_| unreachable!("controlled mask resolves"))
         .unwrap_or_else(|| unreachable!("positive spread remains visible"));
-        assert!(expanded.width() >= 12 && expanded.height() >= 12);
+        assert!(expanded.width() >= 10 && expanded.height() >= 10);
         let eroded = prepare_visual_shadow(
             &rect_support(),
-            NeutralShadowFacts::new(0.0, 0.0, 0.0, -2.0),
-            scale,
+            -2.0,
+            0.0,
+            0.0,
+            0.0,
+            RasterScale::ONE,
+            canvas(),
+            target(),
             limits(),
         )
         .unwrap_or_else(|_| unreachable!("controlled erosion resolves"))
@@ -853,8 +1075,13 @@ mod tests {
     fn complete_erosion_produces_no_visual_shadow() {
         let result = prepare_visual_shadow(
             &rect_support(),
-            NeutralShadowFacts::new(0.0, 0.0, 0.0, -8.0),
+            -8.0,
+            0.0,
+            0.0,
+            0.0,
             RasterScale::ONE,
+            canvas(),
+            target(),
             limits(),
         )
         .unwrap_or_else(|_| unreachable!("controlled erosion resolves"));
@@ -862,30 +1089,49 @@ mod tests {
     }
 
     #[test]
-    fn offset_is_preserved_as_fractional_workspace_origin() {
+    fn off_surface_source_is_cropped_only_after_offset_can_reach_canvas() {
+        let source = Arc::new(NeutralSupport::Primitive(NeutralPrimitiveSupport::Fill {
+            shape: SceneShape::rect(
+                LogicalRect::try_new(-12.0, 4.0, 8.0, 8.0)
+                    .unwrap_or_else(|_| unreachable!("controlled rectangle is valid")),
+            ),
+            local_to_surface: LogicalTransform::IDENTITY,
+        }));
         let shadow = prepare_visual_shadow(
-            &rect_support(),
-            NeutralShadowFacts::new(1.25, -2.5, 0.0, 0.0),
+            &source,
+            0.0,
+            10.0,
+            0.0,
+            0.0,
             RasterScale::ONE,
+            canvas(),
+            target(),
             limits(),
         )
         .unwrap_or_else(|_| unreachable!("controlled offset resolves"))
-        .unwrap_or_else(|| unreachable!("offset shadow remains visible"));
-        assert!((shadow.origin_x() - 1.25).abs() < f64::EPSILON);
-        assert!((shadow.origin_y() + 2.5).abs() < f64::EPSILON);
+        .unwrap_or_else(|| unreachable!("offset shadow reaches the canvas"));
+        assert_eq!(shadow.origin_x(), 0);
+        assert!(shadow.alpha().iter().any(|sample| *sample != 0));
     }
 
     #[test]
-    fn gaussian_output_is_zero_beyond_truncated_three_sigma_workspace() {
+    fn gaussian_output_is_cropped_after_three_sigma_realization() {
         let shadow = prepare_visual_shadow(
             &rect_support(),
-            NeutralShadowFacts::new(0.0, 0.0, 1.0, 0.0),
+            0.0,
+            4.0,
+            4.0,
+            3.0,
             RasterScale::ONE,
+            canvas(),
+            target(),
             limits(),
         )
         .unwrap_or_else(|_| unreachable!("controlled blur resolves"))
         .unwrap_or_else(|| unreachable!("blurred shadow remains visible"));
-        assert_eq!(shadow.width(), 14);
-        assert_eq!(shadow.height(), 14);
+        assert!(shadow.origin_x() <= 4);
+        assert!(shadow.origin_y() <= 4);
+        assert!(shadow.width() <= 14);
+        assert!(shadow.height() <= 14);
     }
 }
