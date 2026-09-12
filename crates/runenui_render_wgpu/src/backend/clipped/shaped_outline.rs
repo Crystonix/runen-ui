@@ -208,8 +208,8 @@ pub(super) fn resolve_positioned_paths(
         };
         let positioned = positioned_scene_path(outline, *glyph, run_origin, resource.font_size())
             .map_err(|()| OutlineResolveFailure::InvalidOutline {
-                glyph_id: glyph.id(),
-            })?;
+            glyph_id: glyph.id(),
+        })?;
         if !positioned.is_coverage_empty() {
             paths.push(positioned);
         }
