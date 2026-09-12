@@ -254,14 +254,10 @@ mod tests {
 
     #[test]
     fn shadow_color_alpha_cannot_change_neutral_support() {
-        let transparent = NeutralSupport::shadow(
-            source(),
-            facts(shadow(Color::rgba(0x10, 0x20, 0x30, 0x00))),
-        );
-        let opaque = NeutralSupport::shadow(
-            source(),
-            facts(shadow(Color::rgba(0xF0, 0xE0, 0xD0, 0xFF))),
-        );
+        let transparent =
+            NeutralSupport::shadow(source(), facts(shadow(Color::rgba(0x10, 0x20, 0x30, 0x00))));
+        let opaque =
+            NeutralSupport::shadow(source(), facts(shadow(Color::rgba(0xF0, 0xE0, 0xD0, 0xFF))));
         assert_eq!(transparent, opaque);
     }
 
@@ -298,10 +294,8 @@ mod tests {
 
     #[test]
     fn neutral_shadow_support_freezes_spread_offset_and_three_sigma_envelope() {
-        let support = NeutralSupport::shadow(
-            source(),
-            facts(shadow(Color::rgba(0x00, 0x00, 0x00, 0x80))),
-        );
+        let support =
+            NeutralSupport::shadow(source(), facts(shadow(Color::rgba(0x00, 0x00, 0x00, 0x80))));
         let NeutralSupport::Shadow {
             spread,
             offset_x,
