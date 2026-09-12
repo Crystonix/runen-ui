@@ -277,16 +277,18 @@ mod tests {
             ),
         ];
         let support = NeutralSupport::group([Arc::clone(&child)], shadows, &[]);
-        let members = match support.as_ref() {
-            NeutralSupport::Union(members) => members,
-            _ => unreachable!("controlled child plus two shadows produces a support union"),
+        let NeutralSupport::Union(members) = support.as_ref() else {
+            unreachable!("controlled child plus two shadows produces a support union");
         };
         assert_eq!(members.len(), 3);
         assert!(Arc::ptr_eq(&members[0], &child));
         for member in &members[1..] {
-            let shadow_source = match member.as_ref() {
-                NeutralSupport::Shadow { source, .. } => source,
-                _ => unreachable!("controlled sibling remains one symbolic shadow operation"),
+            let NeutralSupport::Shadow {
+                source: shadow_source,
+                ..
+            } = member.as_ref()
+            else {
+                unreachable!("controlled sibling remains one symbolic shadow operation");
             };
             assert!(Arc::ptr_eq(shadow_source, &child));
         }
