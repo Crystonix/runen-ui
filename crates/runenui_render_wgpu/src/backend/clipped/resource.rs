@@ -52,8 +52,8 @@ pub enum PublicationRenderError {
     },
     /// Private group-clip geometry realization failed before target mutation.
     GroupClipGeometry { clip_index: usize, detail: String },
-    /// Ordinary composition-group shadows are intentionally deferred to their ADR 0015 checkpoint.
-    UnsupportedGroupShadows,
+    /// Private ordinary-shadow support/mask realization failed before target mutation.
+    GroupShadowRealization { shadow_index: usize, detail: String },
     /// An accepted gradient stop list exceeds this renderer device's buffer limits.
     GradientStopBufferExceedsDeviceLimit {
         item_index: usize,
@@ -133,8 +133,13 @@ impl core::fmt::Display for PublicationRenderError {
                 formatter,
                 "renderer failed to realize composition-group clip {clip_index}: {detail}"
             ),
-            Self::UnsupportedGroupShadows => formatter
-                .write_str("renderer does not yet realize ordinary composition-group shadows"),
+            Self::GroupShadowRealization {
+                shadow_index,
+                detail,
+            } => write!(
+                formatter,
+                "renderer failed to realize composition-group shadow {shadow_index}: {detail}"
+            ),
             Self::GradientStopBufferExceedsDeviceLimit {
                 item_index,
                 required_bytes,
@@ -227,7 +232,7 @@ impl core::error::Error for PublicationRenderError {
             Self::SolidGeometry { .. }
             | Self::ClipGeometry { .. }
             | Self::GroupClipGeometry { .. }
-            | Self::UnsupportedGroupShadows
+            | Self::GroupShadowRealization { .. }
             | Self::GradientStopBufferExceedsDeviceLimit { .. }
             | Self::ImageExtentExceedsDeviceLimit { .. }
             | Self::ImageRowBytesOverflow { .. }
@@ -271,7 +276,7 @@ impl PublicationRenderError {
             | Self::ShapedTextOutlineInvalid { item_index, .. } => Some(*item_index),
             Self::Backend(_)
             | Self::GroupClipGeometry { .. }
-            | Self::UnsupportedGroupShadows
+            | Self::GroupShadowRealization { .. }
             | Self::SurfaceUnavailable
             | Self::SurfaceNotConfigured
             | Self::SurfaceTargetGenerationExhausted
@@ -435,9 +440,10 @@ impl ResourceRenderer {
 
     /// Renders one complete publication and reads actual GPU bytes.
     ///
-    /// Fill/stroke geometry, images, shaped text, and shadow-free atomic groups share
-    /// one ordered target transaction. Scene/group validation, geometry realization,
-    /// device-limit checks, and resource preflight complete before retained-target mutation.
+    /// Fill/stroke geometry, images, shaped text, and atomic groups with ordinary
+    /// shadows share one ordered target transaction. Scene/group validation, geometry
+    /// and shadow-mask realization, device-limit checks, and resource preflight complete
+    /// before retained-target mutation.
     #[allow(
         clippy::too_many_lines,
         reason = "the mixed render transaction intentionally keeps preflight, target mutation, ordered realization, readback, and lineage commit in one auditable sequence"
@@ -447,11 +453,17 @@ impl ResourceRenderer {
         publication: &PaintPublication,
         provider: &P,
     ) -> Result<OffscreenPublicationReadback, PublicationRenderError> {
-        let composition = group::prepare(publication.scene())?;
-        let scene = prepare_resource_scene(publication)?;
-        self.preflight_gradient_stop_buffers(&scene)?;
         let (canvas_extent, extent) = publication_extents(publication)?;
         self.literal.base.validate_extent(extent)?;
+        let composition = group::prepare(
+            publication.scene(),
+            publication.raster_scale(),
+            canvas_extent,
+            extent,
+            self.diagnostics().device_limits().max_buffer_size,
+        )?;
+        let scene = prepare_resource_scene(publication)?;
+        self.preflight_gradient_stop_buffers(&scene)?;
         let layout = ReadbackLayout::new(extent)?;
         self.literal.base.validate_readback_buffer(layout)?;
 
@@ -607,6 +619,7 @@ impl ResourceRenderer {
         if update_plan.mode() != PublicationUpdateMode::AlreadyCurrent {
             self.groups.encode_scene(
                 &self.literal.base.device,
+                &self.literal.base.queue,
                 &self.solids,
                 &self.clips,
                 &self.images,
@@ -688,15 +701,21 @@ impl ResourceRenderer {
         provider: &P,
         before_present: impl FnOnce(),
     ) -> Result<crate::PublicationObservation, PublicationRenderError> {
-        let composition = group::prepare(publication.scene())?;
-        let scene = prepare_resource_scene(publication)?;
-        self.preflight_gradient_stop_buffers(&scene)?;
         let extent = self
             .surface_extent
             .ok_or(PublicationRenderError::SurfaceNotConfigured)?;
         self.literal.base.validate_extent(extent)?;
         let canvas_extent =
             surface_canvas_extent(publication.logical_size(), publication.raster_scale());
+        let composition = group::prepare(
+            publication.scene(),
+            publication.raster_scale(),
+            canvas_extent,
+            extent,
+            self.diagnostics().device_limits().max_buffer_size,
+        )?;
+        let scene = prepare_resource_scene(publication)?;
+        self.preflight_gradient_stop_buffers(&scene)?;
         let target_format = self
             .diagnostics()
             .surface_format()
@@ -846,6 +865,7 @@ impl ResourceRenderer {
                 });
         self.groups.encode_scene(
             &self.literal.base.device,
+            &self.literal.base.queue,
             &self.solids,
             &self.clips,
             &self.images,
@@ -1639,8 +1659,23 @@ mod tests {
             PaintPrimitive::Image(_)
         ));
 
-        let prepared = group::prepare(publication.paint_scene())
-            .unwrap_or_else(|_| unreachable!("shadow-free group is supported"));
+        let canvas_extent = surface_canvas_extent(
+            publication.paint_publication().logical_size(),
+            publication.paint_publication().raster_scale(),
+        );
+        let target_extent = OffscreenExtent::new(
+            u32::from(publication.paint_publication().logical_size().width() as u16),
+            u32::from(publication.paint_publication().logical_size().height() as u16),
+        )
+        .unwrap_or_else(|_| unreachable!("controlled target extent is non-zero"));
+        let prepared = group::prepare(
+            publication.paint_scene(),
+            publication.paint_publication().raster_scale(),
+            canvas_extent,
+            target_extent,
+            u64::MAX,
+        )
+        .unwrap_or_else(|_| unreachable!("shadow-free group is supported"));
         assert!(prepared.has_groups());
         assert!(prepare_resource_scene(publication.paint_publication()).is_ok());
     }
