@@ -818,11 +818,11 @@ fn gaussian_blur(
             let mut value = weights[0] * f64::from(padded.samples[y * width + x]);
             for (offset, &weight) in weights.iter().enumerate().skip(1) {
                 if let Some(left) = x.checked_sub(offset) {
-                    value += weight * f64::from(padded.samples[y * width + left]);
+                    value = weight.mul_add(f64::from(padded.samples[y * width + left]), value);
                 }
                 let right = x + offset;
                 if right < width {
-                    value += weight * f64::from(padded.samples[y * width + right]);
+                    value = weight.mul_add(f64::from(padded.samples[y * width + right]), value);
                 }
             }
             horizontal[y * width + x] = value;
@@ -834,11 +834,11 @@ fn gaussian_blur(
             let mut value = weights[0] * horizontal[y * width + x];
             for (offset, &weight) in weights.iter().enumerate().skip(1) {
                 if let Some(top) = y.checked_sub(offset) {
-                    value += weight * horizontal[top * width + x];
+                    value = weight.mul_add(horizontal[top * width + x], value);
                 }
                 let bottom = y + offset;
                 if bottom < height {
-                    value += weight * horizontal[bottom * width + x];
+                    value = weight.mul_add(horizontal[bottom * width + x], value);
                 }
             }
             samples[y * width + x] = unit_to_u8(value);
