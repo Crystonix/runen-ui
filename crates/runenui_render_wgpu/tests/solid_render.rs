@@ -17,8 +17,8 @@ use runenui_core::{
     StyleEnvironment, UiApp, UnitInterval, Widget, WidgetMeasure,
 };
 use runenui_render_wgpu::{
-    BackendSelection, ImagePayload, PublicationRenderError, PublicationUpdateMode, Renderer,
-    RendererInitError, RendererOptions, ResourcePayload, ResourceProvider, ResourceProviderError,
+    BackendSelection, ImagePayload, PublicationUpdateMode, Renderer, RendererInitError,
+    RendererOptions, ResourcePayload, ResourceProvider, ResourceProviderError,
     ResourceProviderErrorKind, ResourceRequest,
 };
 use runenui_runtime::{
@@ -726,12 +726,6 @@ fn real_gpu_atomic_groups_preserve_contraction_clips_opacity_resources_nesting_a
     assert_ne!(rebuilt.target_generation(), first_generation);
     assert_eq!(rebuilt.readback().rgba8_srgb(), first_pixels);
 
-    let shadow_publication = shadowed_group_publication()?;
-    assert!(matches!(
-        renderer.render_offscreen_publication(&shadow_publication, &NoResources),
-        Err(PublicationRenderError::UnsupportedGroupShadows)
-    ));
-
     let unchanged = renderer.render_offscreen_publication(&publication, &provider)?;
     assert_eq!(
         unchanged.update_plan().mode(),
@@ -739,6 +733,49 @@ fn real_gpu_atomic_groups_preserve_contraction_clips_opacity_resources_nesting_a
     );
     assert_eq!(unchanged.target_generation(), rebuilt.target_generation());
     assert_eq!(unchanged.readback().rgba8_srgb(), first_pixels);
+    Ok(())
+}
+
+#[test]
+fn real_gpu_ordinary_group_shadow_renders_behind_child_and_rebuilds()
+-> Result<(), Box<dyn Error>> {
+    let Some(mut renderer) = renderer_or_adapterless()? else {
+        return Ok(());
+    };
+    let publication = shadowed_group_publication()?;
+    let first = renderer.render_offscreen_publication(&publication, &NoResources)?;
+
+    assert_eq!(
+        pixel(first.readback(), 8, 8),
+        color_bytes(Color::WHITE),
+        "child color must remain above its own ordinary shadow"
+    );
+    let shadow_only = pixel(first.readback(), 13, 8);
+    assert_eq!([shadow_only[0], shadow_only[1], shadow_only[2]], [0, 0, 0]);
+    assert!(
+        shadow_only[3] > 0 && shadow_only[3] < 0x80,
+        "finite Gaussian realization must produce partial shadow alpha outside child coverage: {shadow_only:?}"
+    );
+    assert_eq!(
+        pixel(first.readback(), 20, 20),
+        [0, 0, 0, 0],
+        "ordinary shadow must produce no coverage outside its finite support"
+    );
+
+    let first_generation = first.target_generation();
+    let first_pixels = first.readback().rgba8_srgb().to_vec();
+    assert!(renderer.discard_offscreen_target());
+    let rebuilt = renderer.render_offscreen_publication(&publication, &NoResources)?;
+    assert_eq!(
+        rebuilt.update_plan().mode(),
+        PublicationUpdateMode::FullResync
+    );
+    assert_ne!(rebuilt.target_generation(), first_generation);
+    assert_eq!(
+        rebuilt.readback().rgba8_srgb(),
+        first_pixels,
+        "ordinary-shadow realization must reconstruct identically after target loss"
+    );
     Ok(())
 }
 
