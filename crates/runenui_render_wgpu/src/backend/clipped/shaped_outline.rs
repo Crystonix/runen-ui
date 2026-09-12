@@ -110,10 +110,7 @@ pub(super) fn resolve_unique_outlines(
                 kind,
             });
         }
-        if bitmaps
-            .glyph_for_size(intrinsic_size, glyph_id)
-            .is_some()
-        {
+        if bitmaps.glyph_for_size(intrinsic_size, glyph_id).is_some() {
             return Err(OutlineResolveFailure::UnsupportedGlyph {
                 glyph_id: glyph.id(),
                 kind: UnsupportedOutlineKind::Bitmap,
@@ -160,9 +157,11 @@ pub(super) fn resolve_positioned_paths(
         let Some(Some(path)) = by_id.get(&glyph.id()).copied() else {
             continue;
         };
-        let positioned = position_path(path, *glyph, run_origin, resource.font_size())
-            .map_err(|_| OutlineResolveFailure::InvalidOutline {
-                glyph_id: glyph.id(),
+        let positioned =
+            position_path(path, *glyph, run_origin, resource.font_size()).map_err(|_| {
+                OutlineResolveFailure::InvalidOutline {
+                    glyph_id: glyph.id(),
+                }
             })?;
         if !positioned.is_coverage_empty() {
             paths.push(positioned);
@@ -340,10 +339,14 @@ fn position_point(
     run_origin: LogicalPoint,
     font_size: f32,
 ) -> Result<LogicalPoint, ()> {
-    let x = f64::from(point.x())
-        .mul_add(f64::from(font_size), f64::from(glyph.x()) + f64::from(run_origin.x()));
-    let y = f64::from(point.y())
-        .mul_add(f64::from(font_size), f64::from(glyph.y()) + f64::from(run_origin.y()));
+    let x = f64::from(point.x()).mul_add(
+        f64::from(font_size),
+        f64::from(glyph.x()) + f64::from(run_origin.x()),
+    );
+    let y = f64::from(point.y()).mul_add(
+        f64::from(font_size),
+        f64::from(glyph.y()) + f64::from(run_origin.y()),
+    );
     if !x.is_finite()
         || !y.is_finite()
         || x < f64::from(f32::MIN)
