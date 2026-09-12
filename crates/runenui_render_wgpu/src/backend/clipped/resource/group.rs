@@ -1,17 +1,19 @@
 //! Renderer-private realization of runtime-published atomic paint groups.
 //!
 //! Runtime remains the sole composition authority. This module copies only the
-//! already-contracted `PaintScene` entry structure while preparing group clips
-//! and ADR 0015's alpha-independent symbolic neutral support. Group color is
-//! rendered into a disposable full-surface intermediate and composited exactly
-//! once into its parent. Ordinary-shadow visual realization remains deliberately
-//! fail-closed until the prepared neutral support is consumed by that checkpoint.
+//! already-contracted `PaintScene` entry structure while preparing group clips,
+//! ADR 0015's alpha-independent symbolic neutral support, and disposable ordinary-
+//! shadow masks. Group color is rendered into a disposable full-surface intermediate
+//! and composited exactly once into its parent. Shadow masks are derived before target
+//! mutation and never become scene, publication, bounds, hit, or cache authority.
 
+mod mask;
+mod shadow;
 mod support;
 
 use std::{collections::HashMap, sync::Arc};
 
-use runenui_core::SceneOpacity;
+use runenui_core::{Color, SceneOpacity};
 use runenui_runtime::{PaintPublication, PaintScene, PaintSceneEntry, RasterScale};
 use wgpu::util::DeviceExt;
 
@@ -99,30 +101,47 @@ impl PreparedSceneEntry {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+struct PreparedShadow {
+    mask: mask::AlphaMask,
+    color: Color,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 struct PreparedGroup {
     entries: Vec<PreparedSceneEntry>,
+    shadows: Vec<PreparedShadow>,
     clips: Vec<PreparedClip>,
     opacity: SceneOpacity,
     neutral_support: Arc<support::NeutralSupport>,
 }
 
-pub(super) fn prepare(scene: &PaintScene) -> Result<PreparedComposition, PublicationRenderError> {
+#[allow(
+    clippy::too_many_arguments,
+    reason = "group preflight keeps the immutable runtime scene, exact raster/canvas/target facts, and bounded disposable-mask allocation policy explicit"
+)]
+pub(super) fn prepare(
+    scene: &PaintScene,
+    raster_scale: RasterScale,
+    canvas_extent: RasterCanvasExtent,
+    target_extent: OffscreenExtent,
+    max_workspace_bytes: u64,
+) -> Result<PreparedComposition, PublicationRenderError> {
     let mut has_groups = false;
-    let mut has_shadows = false;
     let mut needs_stencil = false;
+    let mask_limits = mask::MaskLimits::new(max_workspace_bytes);
     let root_entries = prepare_entries(
         scene,
         scene.root_entries(),
+        raster_scale,
+        canvas_extent,
+        target_extent,
+        mask_limits,
         &mut has_groups,
-        &mut has_shadows,
         &mut needs_stencil,
     )?;
     let _scene_neutral_support = support::NeutralSupport::union(
         root_entries.iter().map(PreparedSceneEntry::neutral_support),
     );
-    if has_shadows {
-        return Err(PublicationRenderError::UnsupportedGroupShadows);
-    }
     Ok(PreparedComposition {
         root_entries,
         has_groups,
@@ -130,11 +149,18 @@ pub(super) fn prepare(scene: &PaintScene) -> Result<PreparedComposition, Publica
     })
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "recursive group preflight carries exact target-independent structure plus target-specific disposable mask facts without manufacturing another composition authority"
+)]
 fn prepare_entries(
     scene: &PaintScene,
     entries: &[PaintSceneEntry],
+    raster_scale: RasterScale,
+    canvas_extent: RasterCanvasExtent,
+    target_extent: OffscreenExtent,
+    mask_limits: mask::MaskLimits,
     has_groups: &mut bool,
-    has_shadows: &mut bool,
     needs_stencil: &mut bool,
 ) -> Result<Vec<PreparedSceneEntry>, PublicationRenderError> {
     entries
@@ -166,7 +192,6 @@ fn prepare_entries(
                 .group(group_id)
                 .unwrap_or_else(|| unreachable!("runtime scene group reference resolves"));
             *has_groups = true;
-            *has_shadows |= !group.shadows().is_empty();
             let clips = clip::prepare_clips(group.clips()).map_err(|failure| {
                 PublicationRenderError::GroupClipGeometry {
                     clip_index: failure.clip_index(),
@@ -177,8 +202,11 @@ fn prepare_entries(
             let entries = prepare_entries(
                 scene,
                 group.entries(),
+                raster_scale,
+                canvas_extent,
+                target_extent,
+                mask_limits,
                 has_groups,
-                has_shadows,
                 needs_stencil,
             )?;
             let child_support = support::NeutralSupport::union(
@@ -189,20 +217,57 @@ fn prepare_entries(
             } else {
                 support::NeutralSupport::resolve_shaped_text(scene, child_support)?
             };
+            let shadow_facts = group
+                .shadows()
+                .iter()
+                .copied()
+                .map(|shadow| {
+                    (
+                        support::NeutralShadowFacts::new(
+                            shadow.offset_x(),
+                            shadow.offset_y(),
+                            shadow.sigma().get(),
+                            shadow.spread(),
+                        ),
+                        shadow,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let shadows = shadow_facts
+                .iter()
+                .enumerate()
+                .filter_map(|(shadow_index, (facts, shadow))| {
+                    match mask::prepare_visual_shadow(
+                        &child_support,
+                        f64::from(shadow.spread()),
+                        f64::from(shadow.offset_x()),
+                        f64::from(shadow.offset_y()),
+                        f64::from(shadow.sigma().get()) * 3.0,
+                        raster_scale,
+                        canvas_extent,
+                        target_extent,
+                        mask_limits,
+                    ) {
+                        Ok(Some(mask)) => Some(Ok(PreparedShadow {
+                            mask,
+                            color: shadow.color(),
+                        })),
+                        Ok(None) => None,
+                        Err(error) => Some(Err(PublicationRenderError::GroupShadowRealization {
+                            shadow_index,
+                            detail: error.to_string(),
+                        })),
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             let neutral_support = support::NeutralSupport::group_from_child(
                 child_support,
-                group.shadows().iter().map(|shadow| {
-                    support::NeutralShadowFacts::new(
-                        shadow.offset_x(),
-                        shadow.offset_y(),
-                        shadow.sigma().get(),
-                        shadow.spread(),
-                    )
-                }),
+                shadow_facts.iter().map(|(facts, _)| *facts),
                 group.clips(),
             );
             Ok(PreparedSceneEntry::Group(PreparedGroup {
                 entries,
+                shadows,
                 clips,
                 opacity: group.opacity(),
                 neutral_support,
@@ -221,6 +286,7 @@ struct GroupTargetPipelines {
 pub(super) struct GroupRenderer {
     bind_group_layout: wgpu::BindGroupLayout,
     pipelines: HashMap<wgpu::TextureFormat, GroupTargetPipelines>,
+    shadows: shadow::ShadowRenderer,
 }
 
 impl GroupRenderer {
@@ -253,6 +319,7 @@ impl GroupRenderer {
         Self {
             bind_group_layout,
             pipelines: HashMap::new(),
+            shadows: shadow::ShadowRenderer::new(device),
         }
     }
 
@@ -279,16 +346,18 @@ impl GroupRenderer {
             self.pipelines
                 .insert(target_format, GroupTargetPipelines { ordinary, clipped });
         }
+        self.shadows.ensure_pipeline(device, target_format)?;
         Ok(())
     }
 
     #[allow(
         clippy::too_many_arguments,
-        reason = "the group realization boundary keeps the runtime-published composition, exact target/canvas/scale, item realizers, and shared stencil authority explicit"
+        reason = "the group realization boundary keeps the runtime-published composition, exact target/canvas/scale, queue-backed disposable masks, item realizers, and shared stencil authority explicit"
     )]
     pub(super) fn encode_scene(
         &self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         solid_renderer: &super::solid::SolidRenderer,
         clip_renderer: &ClipRenderer,
         image_renderer: &image::ImageRenderer,
@@ -307,6 +376,7 @@ impl GroupRenderer {
         super::super::clear_color_target(encoder, color_view);
         self.encode_entries(
             device,
+            queue,
             solid_renderer,
             clip_renderer,
             image_renderer,
@@ -331,6 +401,7 @@ impl GroupRenderer {
     fn encode_entries(
         &self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         solid_renderer: &super::solid::SolidRenderer,
         clip_renderer: &ClipRenderer,
         image_renderer: &image::ImageRenderer,
@@ -371,6 +442,7 @@ impl GroupRenderer {
                 }
                 PreparedSceneEntry::Group(group) => self.encode_group(
                     device,
+                    queue,
                     solid_renderer,
                     clip_renderer,
                     image_renderer,
@@ -392,11 +464,12 @@ impl GroupRenderer {
 
     #[allow(
         clippy::too_many_arguments,
-        reason = "atomic group realization keeps child encoding, exact target facts, group clips/opacity, and parent compositing explicit"
+        reason = "atomic group realization keeps authored shadows, child encoding, exact target facts, group clips/opacity, and parent compositing explicit"
     )]
     fn encode_group(
         &self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         solid_renderer: &super::solid::SolidRenderer,
         clip_renderer: &ClipRenderer,
         image_renderer: &image::ImageRenderer,
@@ -424,8 +497,20 @@ impl GroupRenderer {
         });
         let intermediate_view = intermediate.create_view(&wgpu::TextureViewDescriptor::default());
         super::super::clear_color_target(encoder, &intermediate_view);
+        for shadow in &group.shadows {
+            self.shadows.encode(
+                device,
+                queue,
+                encoder,
+                &intermediate_view,
+                target_format,
+                &shadow.mask,
+                shadow.color,
+            );
+        }
         self.encode_entries(
             device,
+            queue,
             solid_renderer,
             clip_renderer,
             image_renderer,
