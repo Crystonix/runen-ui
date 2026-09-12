@@ -1192,7 +1192,6 @@ fn prepare_resource_scene(
                 let solid = solid::SupportedSolid::stroke(
                     shape,
                     *style,
-                    brush.clone(),
                     item.opacity(),
                     item.local_to_surface(),
                     prepared_clips,
@@ -1592,7 +1591,9 @@ mod tests {
     };
     use runenui_runtime::{AppRuntime, LayoutConstraints, RasterScale, SurfaceBuildContext};
 
-    use super::{OffscreenExtent, group, prepare_resource_scene, surface_canvas_extent};
+    use super::{
+        OffscreenExtent, group, prepare_resource_scene, publication_extents, surface_canvas_extent,
+    };
 
     #[derive(Debug)]
     struct ImagePaint;
@@ -1659,15 +1660,8 @@ mod tests {
             PaintPrimitive::Image(_)
         ));
 
-        let canvas_extent = surface_canvas_extent(
-            publication.paint_publication().logical_size(),
-            publication.paint_publication().raster_scale(),
-        );
-        let target_extent = OffscreenExtent::new(
-            u32::from(publication.paint_publication().logical_size().width() as u16),
-            u32::from(publication.paint_publication().logical_size().height() as u16),
-        )
-        .unwrap_or_else(|_| unreachable!("controlled target extent is non-zero"));
+        let (canvas_extent, target_extent) = publication_extents(publication.paint_publication())
+            .unwrap_or_else(|_| unreachable!("controlled publication extents are valid"));
         let prepared = group::prepare(
             publication.paint_scene(),
             publication.paint_publication().raster_scale(),
