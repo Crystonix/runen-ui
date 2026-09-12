@@ -236,7 +236,7 @@ fn prepare_entries(
             let shadows = shadow_facts
                 .iter()
                 .enumerate()
-                .filter_map(|(shadow_index, (facts, shadow))| {
+                .filter_map(|(shadow_index, (_facts, shadow))| {
                     match mask::prepare_visual_shadow(
                         &child_support,
                         f64::from(shadow.spread()),
