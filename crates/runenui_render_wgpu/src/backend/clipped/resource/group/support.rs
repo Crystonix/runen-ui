@@ -169,10 +169,10 @@ impl NeutralSupport {
     /// manufacture duplicate geometry interpretations.
     pub(super) fn resolve_shaped_text(
         scene: &PaintScene,
-        source: Arc<Self>,
+        source: &Arc<Self>,
     ) -> Result<Arc<Self>, PublicationRenderError> {
         let mut memo = HashMap::<*const Self, Arc<Self>>::new();
-        Self::resolve_shaped_text_inner(scene, &source, &mut memo)
+        Self::resolve_shaped_text_inner(scene, source, &mut memo)
     }
 
     fn resolve_shaped_text_inner(
@@ -186,7 +186,6 @@ impl NeutralSupport {
         }
 
         let resolved = match source.as_ref() {
-            Self::Empty => Arc::clone(source),
             Self::Primitive(NeutralPrimitiveSupport::ShapedText {
                 item_index,
                 resource,
@@ -209,7 +208,7 @@ impl NeutralSupport {
                     }))
                 }
             }
-            Self::Primitive(_) => Arc::clone(source),
+            Self::Empty | Self::Primitive(_) => Arc::clone(source),
             Self::Union(members) => {
                 let resolved_members = members
                     .iter()
@@ -276,15 +275,6 @@ impl NeutralSupport {
         Self::clipped(Self::union(output_members), clips)
     }
 
-    /// Convenience construction retained for focused symbolic-support tests.
-    pub(super) fn group(
-        children: impl IntoIterator<Item = Arc<Self>>,
-        shadows: impl IntoIterator<Item = NeutralShadowFacts>,
-        clips: &[SceneClip],
-    ) -> Arc<Self> {
-        Self::group_from_child(Self::union(children), shadows, clips)
-    }
-
     fn shadow(source: Arc<Self>, shadow: NeutralShadowFacts) -> Arc<Self> {
         if matches!(source.as_ref(), Self::Empty) {
             return source;
@@ -310,7 +300,7 @@ impl NeutralSupport {
     }
 }
 
-fn shaped_outline_failure(
+const fn shaped_outline_failure(
     item_index: usize,
     failure: OutlineResolveFailure,
 ) -> PublicationRenderError {
@@ -406,7 +396,7 @@ mod tests {
                 .unwrap_or_else(|_| unreachable!("controlled shadow is valid")),
             ),
         ];
-        let support = NeutralSupport::group([Arc::clone(&child)], shadows, &[]);
+        let support = NeutralSupport::group_from_child(Arc::clone(&child), shadows, &[]);
         let NeutralSupport::Union(members) = support.as_ref() else {
             unreachable!("controlled child plus two shadows produces a support union");
         };
