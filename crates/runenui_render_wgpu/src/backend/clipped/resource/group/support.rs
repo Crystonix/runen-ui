@@ -277,16 +277,18 @@ mod tests {
             ),
         ];
         let support = NeutralSupport::group([Arc::clone(&child)], shadows, &[]);
-        let NeutralSupport::Union(members) = support.as_ref() else {
-            panic!("child plus two shadows must remain a support union");
+        let members = match support.as_ref() {
+            NeutralSupport::Union(members) => members,
+            _ => unreachable!("controlled child plus two shadows produces a support union"),
         };
         assert_eq!(members.len(), 3);
         assert!(Arc::ptr_eq(&members[0], &child));
         for member in &members[1..] {
-            let NeutralSupport::Shadow { source, .. } = member.as_ref() else {
-                panic!("every authored sibling shadow must retain one shadow operation");
+            let shadow_source = match member.as_ref() {
+                NeutralSupport::Shadow { source, .. } => source,
+                _ => unreachable!("controlled sibling remains one symbolic shadow operation"),
             };
-            assert!(Arc::ptr_eq(source, &child));
+            assert!(Arc::ptr_eq(shadow_source, &child));
         }
     }
 
@@ -294,19 +296,19 @@ mod tests {
     fn neutral_shadow_support_freezes_spread_offset_and_three_sigma_envelope() {
         let support =
             NeutralSupport::shadow(source(), facts(shadow(Color::rgba(0x00, 0x00, 0x00, 0x80))));
-        let NeutralSupport::Shadow {
-            spread,
-            offset_x,
-            offset_y,
-            blur_square_half_extent,
-            ..
-        } = support.as_ref()
-        else {
-            panic!("controlled shadow must produce one symbolic shadow operation");
+        let (spread, offset_x, offset_y, blur_square_half_extent) = match support.as_ref() {
+            NeutralSupport::Shadow {
+                spread,
+                offset_x,
+                offset_y,
+                blur_square_half_extent,
+                ..
+            } => (*spread, *offset_x, *offset_y, *blur_square_half_extent),
+            _ => unreachable!("controlled shadow produces one symbolic shadow operation"),
         };
-        assert_eq!(*spread, -1.5);
-        assert_eq!(*offset_x, 2.0);
-        assert_eq!(*offset_y, -3.0);
-        assert_eq!(*blur_square_half_extent, 12.0);
+        assert_eq!(spread.to_bits(), (-1.5_f64).to_bits());
+        assert_eq!(offset_x.to_bits(), 2.0_f64.to_bits());
+        assert_eq!(offset_y.to_bits(), (-3.0_f64).to_bits());
+        assert_eq!(blur_square_half_extent.to_bits(), 12.0_f64.to_bits());
     }
 }
