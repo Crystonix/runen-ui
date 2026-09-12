@@ -478,10 +478,10 @@ fn union_pair(
 ) -> Result<RasterMask, MaskError> {
     let min_x = left.origin_x.min(right.origin_x);
     let min_y = left.origin_y.min(right.origin_y);
-    let max_x = (left.origin_x + f64::from(left.width))
-        .max(right.origin_x + f64::from(right.width));
-    let max_y = (left.origin_y + f64::from(left.height))
-        .max(right.origin_y + f64::from(right.height));
+    let max_x =
+        (left.origin_x + f64::from(left.width)).max(right.origin_x + f64::from(right.width));
+    let max_y =
+        (left.origin_y + f64::from(left.height)).max(right.origin_y + f64::from(right.height));
     let Some((origin_x, origin_y, width, height)) =
         workspace_from_bounds(min_x, min_y, max_x, max_y, limits)?
     else {
