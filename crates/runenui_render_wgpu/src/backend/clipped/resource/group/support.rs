@@ -11,17 +11,17 @@
 use std::{collections::HashMap, sync::Arc};
 
 use runenui_core::{
-    LogicalPoint, LogicalRect, LogicalTransform, PaintPrimitive, ResourceRef, ScenePath, SceneShape,
-    StrokeStyle,
+    LogicalPoint, LogicalRect, LogicalTransform, PaintPrimitive, ResourceRef, ScenePath,
+    SceneShape, StrokeStyle,
 };
 use runenui_runtime::{PaintScene, PaintSceneItem, SceneClip};
 
 use crate::scene_subset::UnsupportedSceneSemantic;
 
-use super::super::{PublicationRenderError, UnsupportedShapedGlyphKind};
 use super::super::super::shaped_outline::{
     OutlineResolveFailure, UnsupportedOutlineKind, resolve_positioned_paths,
 };
+use super::super::{PublicationRenderError, UnsupportedShapedGlyphKind};
 
 /// Renderer-private scalar facts frozen from one runtime-published ordinary shadow.
 ///
@@ -193,22 +193,20 @@ impl NeutralSupport {
                 origin,
                 local_to_surface,
             }) => {
-                let shaped = scene
-                    .shaped_text_resource(resource)
-                    .ok_or(PublicationRenderError::ShapedTextResourceUnavailable {
+                let shaped = scene.shaped_text_resource(resource).ok_or(
+                    PublicationRenderError::ShapedTextResourceUnavailable {
                         item_index: *item_index,
-                    })?;
+                    },
+                )?;
                 let paths = resolve_positioned_paths(shaped, *origin)
                     .map_err(|failure| shaped_outline_failure(*item_index, failure))?;
                 if paths.is_empty() {
                     Arc::new(Self::Empty)
                 } else {
-                    Arc::new(Self::Primitive(
-                        NeutralPrimitiveSupport::ShapedTextPaths {
-                            paths: paths.into(),
-                            local_to_surface: *local_to_surface,
-                        },
-                    ))
+                    Arc::new(Self::Primitive(NeutralPrimitiveSupport::ShapedTextPaths {
+                        paths: paths.into(),
+                        local_to_surface: *local_to_surface,
+                    }))
                 }
             }
             Self::Primitive(_) => Arc::clone(source),
