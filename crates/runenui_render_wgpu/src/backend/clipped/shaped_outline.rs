@@ -31,7 +31,7 @@ pub(super) enum UnsupportedOutlineKind {
     FauxBold,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum OutlineResolveFailure {
     UnsupportedGlyph {
         glyph_id: u32,
@@ -173,7 +173,7 @@ pub(super) fn resolve_unique_outlines(
                     glyph_id: glyph.id(),
                 })?;
             pen.finish()
-                .map_err(|_| OutlineResolveFailure::InvalidOutline {
+                .map_err(|()| OutlineResolveFailure::InvalidOutline {
                     glyph_id: glyph.id(),
                 })?
         } else {
@@ -207,7 +207,7 @@ pub(super) fn resolve_positioned_paths(
             continue;
         };
         let positioned = positioned_scene_path(outline, *glyph, run_origin, resource.font_size())
-            .map_err(|_| OutlineResolveFailure::InvalidOutline {
+            .map_err(|()| OutlineResolveFailure::InvalidOutline {
                 glyph_id: glyph.id(),
             })?;
         if !positioned.is_coverage_empty() {
