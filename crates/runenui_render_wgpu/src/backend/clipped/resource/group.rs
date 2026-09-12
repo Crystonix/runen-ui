@@ -146,8 +146,8 @@ fn prepare_entries(
                     .items()
                     .get(item_index)
                     .unwrap_or_else(|| unreachable!("runtime composition item index resolves"));
-                let neutral_support =
-                    support::NeutralSupport::from_item(item).map_err(|semantic| {
+                let neutral_support = support::NeutralSupport::from_item(item_index, item)
+                    .map_err(|semantic| {
                         super::scene_failure(SceneValidationError::UnsupportedItem {
                             item_index,
                             semantic,
@@ -181,8 +181,16 @@ fn prepare_entries(
                 has_shadows,
                 needs_stencil,
             )?;
-            let neutral_support = support::NeutralSupport::group(
+            let child_support = support::NeutralSupport::union(
                 entries.iter().map(PreparedSceneEntry::neutral_support),
+            );
+            let child_support = if group.shadows().is_empty() {
+                child_support
+            } else {
+                support::NeutralSupport::resolve_shaped_text(scene, child_support)?
+            };
+            let neutral_support = support::NeutralSupport::group_from_child(
+                child_support,
                 group.shadows().iter().map(|shadow| {
                     support::NeutralShadowFacts::new(
                         shadow.offset_x(),
