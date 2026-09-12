@@ -14,8 +14,8 @@ use runenui_runtime::{RasterScale, SceneClip};
 
 use crate::tessellation::{TessellatedGeometry, tessellate_fill, tessellate_stroke};
 
-use super::support::{NeutralPrimitiveSupport, NeutralSupport};
 use super::super::super::super::{OffscreenExtent, RasterCanvasExtent};
+use super::support::{NeutralPrimitiveSupport, NeutralSupport};
 
 const DISTANCE_INFINITY: f64 = 1.0e30;
 const PEAK_WORKSPACE_BYTES_PER_PIXEL: u64 = 24;
@@ -70,10 +70,7 @@ pub(super) enum MaskError {
     UnresolvedShapedText,
     NonFiniteWorkspace,
     WorkspaceExtentOverflow,
-    AllocationExceedsLimit {
-        required_bytes: u64,
-        max_bytes: u64,
-    },
+    AllocationExceedsLimit { required_bytes: u64, max_bytes: u64 },
     AllocationFailed,
 }
 
@@ -142,16 +139,7 @@ fn rasterize_support(
     match support.as_ref() {
         NeutralSupport::Empty => Ok(None),
         NeutralSupport::Primitive(primitive) => rasterize_primitive(primitive, scale, limits),
-        NeutralSupport::Union(members) => {
-            let masks = members
-                .iter()
-                .map(|member| rasterize_support(member, scale, limits))
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>();
-            union_masks(&masks, limits)
-        }
+        NeutralSupport::Union(members) => rasterize_support_union(members, scale, limits),
         NeutralSupport::Shadow {
             source,
             spread,
@@ -185,6 +173,18 @@ fn rasterize_support(
     }
 }
 
+fn rasterize_support_union(
+    members: &[Arc<NeutralSupport>],
+    scale: f64,
+    limits: MaskLimits,
+) -> Result<Option<RasterMask>, MaskError> {
+    let mut union = None;
+    for member in members {
+        union = merge_masks(union, rasterize_support(member, scale, limits)?, limits)?;
+    }
+    Ok(union)
+}
+
 fn rasterize_primitive(
     primitive: &NeutralPrimitiveSupport,
     scale: f64,
@@ -215,38 +215,36 @@ fn rasterize_primitive(
             destinations,
             local_to_surface,
         } => {
-            let masks = destinations
-                .iter()
-                .map(|destination| {
-                    let shape = SceneShape::rect(*destination);
-                    let geometry = tessellate_fill(&shape)
-                        .map_err(|error| MaskError::Geometry(error.to_string()))?;
-                    geometry_mask(&geometry, *local_to_surface, scale, limits)
-                })
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>();
-            union_masks(&masks, limits)
+            let mut union = None;
+            for destination in destinations.iter() {
+                let shape = SceneShape::rect(*destination);
+                let geometry = tessellate_fill(&shape)
+                    .map_err(|error| MaskError::Geometry(error.to_string()))?;
+                union = merge_masks(
+                    union,
+                    geometry_mask(&geometry, *local_to_surface, scale, limits)?,
+                    limits,
+                )?;
+            }
+            Ok(union)
         }
         NeutralPrimitiveSupport::ShapedText { .. } => Err(MaskError::UnresolvedShapedText),
         NeutralPrimitiveSupport::ShapedTextPaths {
             paths,
             local_to_surface,
         } => {
-            let masks = paths
-                .iter()
-                .map(|path| {
-                    let shape = SceneShape::path(path.clone());
-                    let geometry = tessellate_fill(&shape)
-                        .map_err(|error| MaskError::Geometry(error.to_string()))?;
-                    geometry_mask(&geometry, *local_to_surface, scale, limits)
-                })
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>();
-            union_masks(&masks, limits)
+            let mut union = None;
+            for path in paths.iter() {
+                let shape = SceneShape::path(path.clone());
+                let geometry = tessellate_fill(&shape)
+                    .map_err(|error| MaskError::Geometry(error.to_string()))?;
+                union = merge_masks(
+                    union,
+                    geometry_mask(&geometry, *local_to_surface, scale, limits)?,
+                    limits,
+                )?;
+            }
+            Ok(union)
         }
     }
 }
@@ -317,11 +315,7 @@ fn geometry_mask(
     Ok((!mask.is_empty()).then_some(mask))
 }
 
-fn transform_physical(
-    point: [f32; 2],
-    transform: LogicalTransform,
-    scale: f64,
-) -> [f64; 2] {
+fn transform_physical(point: [f32; 2], transform: LogicalTransform, scale: f64) -> [f64; 2] {
     let [m11, m12, m21, m22, tx, ty] = transform.components().map(f64::from);
     let x = f64::from(point[0]);
     let y = f64::from(point[1]);
@@ -403,11 +397,7 @@ fn sample_count(width: u32, height: u32, limits: MaskLimits) -> Result<usize, Ma
         .map_err(|_| MaskError::WorkspaceExtentOverflow)
 }
 
-fn allocate_u8_samples(
-    width: u32,
-    height: u32,
-    limits: MaskLimits,
-) -> Result<Vec<u8>, MaskError> {
+fn allocate_u8_samples(width: u32, height: u32, limits: MaskLimits) -> Result<Vec<u8>, MaskError> {
     zeroed_vec(sample_count(width, height, limits)?, 0_u8)
 }
 
@@ -469,30 +459,33 @@ fn edge_sign(point: [f64; 2], from: [f64; 2], to: [f64; 2]) -> f64 {
     (point[0] - to[0]) * (from[1] - to[1]) - (from[0] - to[0]) * (point[1] - to[1])
 }
 
-fn union_masks(masks: &[RasterMask], limits: MaskLimits) -> Result<Option<RasterMask>, MaskError> {
-    let Some(first) = masks.first() else {
-        return Ok(None);
-    };
-    let min_x = masks
-        .iter()
-        .map(|mask| mask.origin_x)
-        .fold(first.origin_x, f64::min);
-    let min_y = masks
-        .iter()
-        .map(|mask| mask.origin_y)
-        .fold(first.origin_y, f64::min);
-    let max_x = masks
-        .iter()
-        .map(|mask| mask.origin_x + f64::from(mask.width))
-        .fold(first.origin_x + f64::from(first.width), f64::max);
-    let max_y = masks
-        .iter()
-        .map(|mask| mask.origin_y + f64::from(mask.height))
-        .fold(first.origin_y + f64::from(first.height), f64::max);
+fn merge_masks(
+    current: Option<RasterMask>,
+    next: Option<RasterMask>,
+    limits: MaskLimits,
+) -> Result<Option<RasterMask>, MaskError> {
+    match (current, next) {
+        (None, next) => Ok(next),
+        (current, None) => Ok(current),
+        (Some(current), Some(next)) => union_pair(current, next, limits).map(Some),
+    }
+}
+
+fn union_pair(
+    left: RasterMask,
+    right: RasterMask,
+    limits: MaskLimits,
+) -> Result<RasterMask, MaskError> {
+    let min_x = left.origin_x.min(right.origin_x);
+    let min_y = left.origin_y.min(right.origin_y);
+    let max_x = (left.origin_x + f64::from(left.width))
+        .max(right.origin_x + f64::from(right.width));
+    let max_y = (left.origin_y + f64::from(left.height))
+        .max(right.origin_y + f64::from(right.height));
     let Some((origin_x, origin_y, width, height)) =
         workspace_from_bounds(min_x, min_y, max_x, max_y, limits)?
     else {
-        return Ok(None);
+        unreachable!("union of two non-empty raster masks has non-empty bounds")
     };
     let mut result = RasterMask {
         origin_x,
@@ -506,15 +499,12 @@ fn union_masks(masks: &[RasterMask], limits: MaskLimits) -> Result<Option<Raster
         let surface_y = origin_y + usize_as_f64(y) + 0.5;
         for x in 0..width_usize {
             let surface_x = origin_x + usize_as_f64(x) + 0.5;
-            if masks
-                .iter()
-                .any(|mask| mask.sample(surface_x, surface_y) != 0)
-            {
+            if left.sample(surface_x, surface_y) != 0 || right.sample(surface_x, surface_y) != 0 {
                 result.samples[y * width_usize + x] = 1;
             }
         }
     }
-    Ok((!result.is_empty()).then_some(result))
+    Ok(result)
 }
 
 fn intersect_clip(mask: &mut RasterMask, clip: &SceneClip, scale: f64) -> Result<(), MaskError> {
@@ -562,7 +552,8 @@ fn dilate_euclidean(
 ) -> Result<RasterMask, MaskError> {
     let pad = radius_pad(radius, 0)?;
     let padded = pad_mask(&mask, pad, limits)?;
-    let distances = squared_distance_transform(&padded.samples, padded.width, padded.height, true, limits)?;
+    let distances =
+        squared_distance_transform(&padded.samples, padded.width, padded.height, true, limits)?;
     let threshold = radius * radius;
     let samples = distances
         .into_iter()
@@ -578,7 +569,8 @@ fn erode_euclidean(
 ) -> Result<RasterMask, MaskError> {
     let pad = radius_pad(radius, 1)?;
     let padded = pad_mask(&mask, pad, limits)?;
-    let distances = squared_distance_transform(&padded.samples, padded.width, padded.height, false, limits)?;
+    let distances =
+        squared_distance_transform(&padded.samples, padded.width, padded.height, false, limits)?;
     let threshold = radius * radius;
     let padded_width = usize_from_u32(padded.width);
     let source_width = usize_from_u32(mask.width);
@@ -615,7 +607,9 @@ fn pad_mask(mask: &RasterMask, pad: u32, limits: MaskLimits) -> Result<RasterMas
     if pad == 0 {
         return Ok(mask.clone());
     }
-    let double_pad = pad.checked_mul(2).ok_or(MaskError::WorkspaceExtentOverflow)?;
+    let double_pad = pad
+        .checked_mul(2)
+        .ok_or(MaskError::WorkspaceExtentOverflow)?;
     let width = mask
         .width
         .checked_add(double_pad)
@@ -756,10 +750,7 @@ fn square_dilate(
         }
         for x in 0..width {
             let start = x.saturating_sub(kernel_radius);
-            let end = x
-                .saturating_add(kernel_radius)
-                .saturating_add(1)
-                .min(width);
+            let end = x.saturating_add(kernel_radius).saturating_add(1).min(width);
             horizontal[y * width + x] = u8::from(prefix[end] != prefix[start]);
         }
     }
@@ -874,13 +865,15 @@ fn crop_to_final_canvas(
     let mut alpha = allocate_u8_samples(width, height, limits)?;
     let width_usize = usize_from_u32(width);
     for y in 0..usize_from_u32(height) {
-        let target_y = origin_y + u32::try_from(y).map_err(|_| MaskError::WorkspaceExtentOverflow)?;
+        let target_y =
+            origin_y + u32::try_from(y).map_err(|_| MaskError::WorkspaceExtentOverflow)?;
         let surface_y = f64::from(target_y) + 0.5;
         if surface_y >= canvas_extent.height() {
             continue;
         }
         for x in 0..width_usize {
-            let target_x = origin_x + u32::try_from(x).map_err(|_| MaskError::WorkspaceExtentOverflow)?;
+            let target_x =
+                origin_x + u32::try_from(x).map_err(|_| MaskError::WorkspaceExtentOverflow)?;
             let surface_x = f64::from(target_x) + 0.5;
             if surface_x >= canvas_extent.width() {
                 continue;
@@ -984,7 +977,8 @@ fn clamped_f64_to_u32(value: f64, upper: u32) -> u32 {
 }
 
 fn usize_from_u32(value: u32) -> usize {
-    usize::try_from(value).unwrap_or_else(|_| unreachable!("supported renderer targets address u32 dimensions"))
+    usize::try_from(value)
+        .unwrap_or_else(|_| unreachable!("supported renderer targets address u32 dimensions"))
 }
 
 fn usize_as_f64(value: usize) -> f64 {
@@ -1011,10 +1005,10 @@ mod tests {
     use runenui_runtime::RasterScale;
 
     use super::{MaskLimits, prepare_visual_shadow};
-    use crate::backend::{OffscreenExtent, RasterCanvasExtent};
     use crate::backend::clipped::resource::group::support::{
         NeutralPrimitiveSupport, NeutralSupport,
     };
+    use crate::backend::{OffscreenExtent, RasterCanvasExtent};
 
     fn rect_support() -> Arc<NeutralSupport> {
         Arc::new(NeutralSupport::Primitive(NeutralPrimitiveSupport::Fill {
