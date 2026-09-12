@@ -8,15 +8,20 @@
 //! disposable realization of this symbolic support; nested groups must propagate
 //! this expression rather than rendered pixels.
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use runenui_core::{
-    LogicalPoint, LogicalRect, LogicalTransform, PaintPrimitive, ResourceRef, SceneShape,
+    LogicalPoint, LogicalRect, LogicalTransform, PaintPrimitive, ResourceRef, ScenePath, SceneShape,
     StrokeStyle,
 };
-use runenui_runtime::{PaintSceneItem, SceneClip};
+use runenui_runtime::{PaintScene, PaintSceneItem, SceneClip};
 
 use crate::scene_subset::UnsupportedSceneSemantic;
+
+use super::super::{PublicationRenderError, UnsupportedShapedGlyphKind};
+use super::super::super::shaped_outline::{
+    OutlineResolveFailure, UnsupportedOutlineKind, resolve_positioned_paths,
+};
 
 /// Renderer-private scalar facts frozen from one runtime-published ordinary shadow.
 ///
@@ -64,8 +69,13 @@ pub(super) enum NeutralPrimitiveSupport {
         local_to_surface: LogicalTransform,
     },
     ShapedText {
+        item_index: usize,
         resource: ResourceRef,
         origin: LogicalPoint,
+        local_to_surface: LogicalTransform,
+    },
+    ShapedTextPaths {
+        paths: Arc<[ScenePath]>,
         local_to_surface: LogicalTransform,
     },
 }
@@ -101,8 +111,12 @@ pub(super) enum NeutralSupport {
 
 impl NeutralSupport {
     /// Reconstructs one published item's exact neutral support without observing
-    /// any realized source alpha or item opacity.
-    pub(super) fn from_item(item: &PaintSceneItem) -> Result<Arc<Self>, UnsupportedSceneSemantic> {
+    /// any realized source alpha or item opacity. Shaped text keeps only its retained
+    /// resource identity until an actual shadow consumes that support.
+    pub(super) fn from_item(
+        item_index: usize,
+        item: &PaintSceneItem,
+    ) -> Result<Arc<Self>, UnsupportedSceneSemantic> {
         let local_to_surface = item.local_to_surface();
         let primitive = match item.primitive() {
             PaintPrimitive::Fill { shape, .. } => NeutralPrimitiveSupport::Fill {
@@ -135,6 +149,7 @@ impl NeutralSupport {
                 }
             }
             PaintPrimitive::ShapedTextRun(run) => NeutralPrimitiveSupport::ShapedText {
+                item_index,
                 resource: run.resource_ref().clone(),
                 origin: run.origin(),
                 local_to_surface,
@@ -145,6 +160,85 @@ impl NeutralSupport {
             Arc::new(Self::Primitive(primitive)),
             item.clips(),
         ))
+    }
+
+    /// Resolves only shaped-text nodes reachable from a support set that is actually
+    /// consumed by an ordinary shadow. The immutable retained shaped resource is read
+    /// directly from this exact publication; atlas/MSDF state never participates.
+    /// Shared symbolic nodes are memoized so sibling/ancestor support reuse does not
+    /// manufacture duplicate geometry interpretations.
+    pub(super) fn resolve_shaped_text(
+        scene: &PaintScene,
+        source: Arc<Self>,
+    ) -> Result<Arc<Self>, PublicationRenderError> {
+        let mut memo = HashMap::<*const Self, Arc<Self>>::new();
+        Self::resolve_shaped_text_inner(scene, &source, &mut memo)
+    }
+
+    fn resolve_shaped_text_inner(
+        scene: &PaintScene,
+        source: &Arc<Self>,
+        memo: &mut HashMap<*const Self, Arc<Self>>,
+    ) -> Result<Arc<Self>, PublicationRenderError> {
+        let key = Arc::as_ptr(source);
+        if let Some(resolved) = memo.get(&key) {
+            return Ok(Arc::clone(resolved));
+        }
+
+        let resolved = match source.as_ref() {
+            Self::Empty => Arc::clone(source),
+            Self::Primitive(NeutralPrimitiveSupport::ShapedText {
+                item_index,
+                resource,
+                origin,
+                local_to_surface,
+            }) => {
+                let shaped = scene
+                    .shaped_text_resource(resource)
+                    .ok_or(PublicationRenderError::ShapedTextResourceUnavailable {
+                        item_index: *item_index,
+                    })?;
+                let paths = resolve_positioned_paths(shaped, *origin)
+                    .map_err(|failure| shaped_outline_failure(*item_index, failure))?;
+                if paths.is_empty() {
+                    Arc::new(Self::Empty)
+                } else {
+                    Arc::new(Self::Primitive(
+                        NeutralPrimitiveSupport::ShapedTextPaths {
+                            paths: paths.into(),
+                            local_to_surface: *local_to_surface,
+                        },
+                    ))
+                }
+            }
+            Self::Primitive(_) => Arc::clone(source),
+            Self::Union(members) => {
+                let resolved_members = members
+                    .iter()
+                    .map(|member| Self::resolve_shaped_text_inner(scene, member, memo))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Self::union(resolved_members)
+            }
+            Self::Shadow {
+                source: shadow_source,
+                spread,
+                offset_x,
+                offset_y,
+                blur_square_half_extent,
+            } => Arc::new(Self::Shadow {
+                source: Self::resolve_shaped_text_inner(scene, shadow_source, memo)?,
+                spread: *spread,
+                offset_x: *offset_x,
+                offset_y: *offset_y,
+                blur_square_half_extent: *blur_square_half_extent,
+            }),
+            Self::Clip { source, clips } => Arc::new(Self::Clip {
+                source: Self::resolve_shaped_text_inner(scene, source, memo)?,
+                clips: Arc::clone(clips),
+            }),
+        };
+        memo.insert(key, Arc::clone(&resolved));
+        Ok(resolved)
     }
 
     /// Unions direct child support without introducing painter-order authority.
@@ -161,15 +255,14 @@ impl NeutralSupport {
         }
     }
 
-    /// Builds one group's ADR 0015 output support. Every sibling shadow receives
-    /// the same exact pre-shadow child-support allocation; no shadow chains from a
-    /// previous sibling's result.
-    pub(super) fn group(
-        children: impl IntoIterator<Item = Arc<Self>>,
+    /// Builds one group's ADR 0015 output support from already-unioned direct child
+    /// support. Every sibling shadow receives the same exact pre-shadow allocation;
+    /// no shadow chains from a previous sibling's result.
+    pub(super) fn group_from_child(
+        child: Arc<Self>,
         shadows: impl IntoIterator<Item = NeutralShadowFacts>,
         clips: &[SceneClip],
     ) -> Arc<Self> {
-        let child = Self::union(children);
         if matches!(child.as_ref(), Self::Empty) {
             return child;
         }
@@ -183,6 +276,15 @@ impl NeutralSupport {
                 .map(|shadow| Self::shadow(Arc::clone(&child), shadow)),
         );
         Self::clipped(Self::union(output_members), clips)
+    }
+
+    /// Convenience construction retained for focused symbolic-support tests.
+    pub(super) fn group(
+        children: impl IntoIterator<Item = Arc<Self>>,
+        shadows: impl IntoIterator<Item = NeutralShadowFacts>,
+        clips: &[SceneClip],
+    ) -> Arc<Self> {
+        Self::group_from_child(Self::union(children), shadows, clips)
     }
 
     fn shadow(source: Arc<Self>, shadow: NeutralShadowFacts) -> Arc<Self> {
@@ -206,6 +308,36 @@ impl NeutralSupport {
                 source,
                 clips: clips.to_vec().into(),
             })
+        }
+    }
+}
+
+fn shaped_outline_failure(
+    item_index: usize,
+    failure: OutlineResolveFailure,
+) -> PublicationRenderError {
+    match failure {
+        OutlineResolveFailure::UnsupportedGlyph { glyph_id, kind } => {
+            PublicationRenderError::UnsupportedShapedGlyph {
+                item_index,
+                glyph_id,
+                kind: match kind {
+                    UnsupportedOutlineKind::ColrV0 => UnsupportedShapedGlyphKind::ColrV0,
+                    UnsupportedOutlineKind::ColrV1 => UnsupportedShapedGlyphKind::ColrV1,
+                    UnsupportedOutlineKind::Bitmap => UnsupportedShapedGlyphKind::Bitmap,
+                    UnsupportedOutlineKind::Svg => UnsupportedShapedGlyphKind::Svg,
+                    UnsupportedOutlineKind::FauxBold => UnsupportedShapedGlyphKind::FauxBold,
+                },
+            }
+        }
+        OutlineResolveFailure::InvalidFont => {
+            PublicationRenderError::ShapedTextFontInvalid { item_index }
+        }
+        OutlineResolveFailure::InvalidOutline { glyph_id } => {
+            PublicationRenderError::ShapedTextOutlineInvalid {
+                item_index,
+                glyph_id,
+            }
         }
     }
 }
